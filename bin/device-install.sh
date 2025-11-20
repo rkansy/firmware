@@ -14,6 +14,7 @@ BIGDB_8MB=(
     "crowpanel-esp32s3"
     "heltec_capsule_sensor_v3"
     "heltec-v3"
+    "heltec-v3-custom"
     "heltec-vision-master-e213"
     "heltec-vision-master-e290"
     "heltec-vision-master-t190"
@@ -47,6 +48,7 @@ BIGDB_16MB=(
 S3_VARIANTS=(
     "s3"
     "-v3"
+    "-v3-custom"
     "-v4"
     "t-deck"
     "wireless-paper"
