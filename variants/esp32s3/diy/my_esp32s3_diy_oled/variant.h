@@ -8,8 +8,8 @@
 
 #define USE_SSD1306
 
-#define I2C_SDA 18 // 1 // I2C pins for this board
-#define I2C_SCL 17 // 2
+#define I2C_SDA 8 // 1 // I2C pins for this board
+#define I2C_SCL 9 // 2
 
 // #define LED_PIN 38     // This is a RGB LED not a standard LED
 #define HAS_NEOPIXEL                         // Enable the use of neopixels
