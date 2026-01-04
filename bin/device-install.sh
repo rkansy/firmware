@@ -7,10 +7,65 @@ MCU=""
 # Constants
 RESET_BAUD=1200
 FIRMWARE_OFFSET=0x00
-# Default littlefs* offset.
-OFFSET=0x300000
-# Default OTA Offset
-OTA_OFFSET=0x260000
+
+# Variant groups
+BIGDB_8MB=(
+    "crowpanel-esp32s3"
+    "heltec_capsule_sensor_v3"
+    "heltec-v3"
+    "heltec-v3-custom"
+    "heltec-vision-master-e213"
+    "heltec-vision-master-e290"
+    "heltec-vision-master-t190"
+    "heltec-wireless-paper"
+    "heltec-wireless-tracker"
+    "heltec-wsl-v3"
+    "icarus"
+    "seeed-xiao-s3"
+    "tbeam-s3-core"
+    "tracksenger"
+)
+MUIDB_8MB=(
+    "picomputer-s3"
+    "unphone"
+    "seeed-sensecap-indicator"
+)
+BIGDB_16MB=(
+    "dreamcatcher"
+    "elecrow-adv"
+    "ESP32-S3-Pico"
+    "heltec-v4"
+    "m5stack-cores3"
+    "mesh-tab"
+    "station-g2"
+    "t-deck"
+    "t-energy-s3"
+    "t-eth-elite"
+    "t-watch-s3"
+    "tlora-pager"
+)
+S3_VARIANTS=(
+    "s3"
+    "-v3"
+    "-v3-custom"
+    "-v4"
+    "t-deck"
+    "wireless-paper"
+    "wireless-tracker"
+    "station-g2"
+    "unphone"
+    "t-eth-elite"
+    "tlora-pager"
+    "mesh-tab"
+    "dreamcatcher"
+    "ESP32-S3-Pico"
+    "seeed-sensecap-indicator"
+    "heltec_capsule_sensor_v3"
+    "vision-master"
+    "icarus"
+    "tracksenger"
+    "elecrow-adv"
+)
 
 # Determine the correct esptool command to use
 if "$PYTHON" -m esptool version >/dev/null 2>&1; then
