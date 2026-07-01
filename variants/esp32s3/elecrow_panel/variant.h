@@ -13,13 +13,13 @@ extern bool elecrow_v2; // false = v1, true = v2
 #if CROW_SELECT == 1
 // dac / amp
 // #define HAS_I2S // didn't get I2S sound working
-#define PIN_BUZZER 8 // using pwm buzzer instead (nobody will notice, lol)
+#define PIN_BUZZER 16 // using pwm buzzer instead (nobody will notice, lol)
 #define DAC_I2S_BCK 13
 #define DAC_I2S_WS 11
 #define DAC_I2S_DOUT 12
 #define DAC_I2S_MCLK 8 // don't use GPIO0 because it's assigned to LoRa or button
 #else
-#define PIN_BUZZER (elecrow_v2 ? 0 : 8)
+#define PIN_BUZZER 16
 #endif
 
 // GPS via UART1 connector
@@ -74,7 +74,7 @@ extern bool elecrow_v2; // false = v1, true = v2
 #define SENSOR_POWER_ON LOW
 #else
 // 4.3", 5.0", 7.0"
-#define LORA_CS (elecrow_v2 ? 8 : 0)
+#define LORA_CS 8
 #define LORA_SCK 5
 #define LORA_MISO 4
 #define LORA_MOSI 6
