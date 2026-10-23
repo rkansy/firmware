@@ -1,0 +1,22 @@
+[Unit]
+Description=Meshtastic daemon (multi-client build)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=200
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=meshtasticd
+Group=meshtasticd
+# VFS home (prefs: channels/config/device/module/nodes.proto, transmit history)
+Environment=HOME=/var/lib/meshtasticd
+ExecStart=/usr/bin/meshtasticd --config=/etc/meshtasticd/config.yaml --fsdir=/var/lib/meshtasticd
+Restart=always
+RestartSec=3
+# Light hardening (JSON packet log lives at /packets.json per config)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,39 @@
+### Meshtasticd config for k4nsy-long class hardware:
+### Raspberry Pi 5 + RAK6421 (SX1262) in HAT slot 1 + serial GPS.
+###
+### This is the main config. Per-radio hardware profiles live in config.d/
+### and are merged on top of this file at startup.
+###
+### Multi-client note: this build of meshtasticd serves the TCP API (port
+### 4403) to any number of concurrent clients natively — no external
+### multiplexer proxy is required. Each client gets its own config handshake
+### and packet-id space; live traffic fans out to all connected clients.
+
+Lora:
+  # Overridden by config.d/lora-RAK6421-13300-slot1.yaml
+  Module: auto
+
+GPS:
+  SerialPath: /dev/ttyAMA0
+
+Logging:
+  LogLevel: info
+  TraceFile: /var/log/meshtasticd.json
+  # JSON packet logging (rotated every 60 min, filtered to position packets)
+  JSONFile: /packets.json
+  JSONFileRotate: 60
+  JSONFilter: position
+  AsciiLogs: true
+
+Webserver:
+  Port: 9443
+  RootPath: /usr/share/meshtasticd/web
+  SSLKey: /etc/meshtasticd/ssl/private_key.pem
+  SSLCert: /etc/meshtasticd/ssl/certificate.pem
+
+General:
+  APIPort: 4403
+  MaxNodes: 512
+  MaxMessageQueue: 100
+  ConfigDirectory: /etc/meshtasticd/config.d/
+  AvailableDirectory: /etc/meshtasticd/available.d/

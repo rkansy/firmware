@@ -1,0 +1,18 @@
+Meta:
+  name: RAK6421 + RAK13300 Slot 1
+  support: official
+  compatible:
+    - raspberry-pi
+
+### RAK13300 (SX1262) mounted in HAT slot 1 — pins as on the reference node
+### k4nsy-long (Raspberry Pi 5, Debian trixie).
+Lora:
+  Module: sx1262
+  IRQ: 22 # IO6
+  Reset: 16 # IO4
+  Busy: 24 # IO5
+  Ant_sw: 13 # IO3
+  DIO3_TCXO_VOLTAGE: true
+  DIO2_AS_RF_SWITCH: true
+  spidev: spidev0.0
+  CS: 8
