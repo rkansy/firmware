@@ -89,14 +89,18 @@ RUN apt-get update && apt-get --no-install-recommends -y install \
                /etc/meshtasticd/available.d \
                /etc/meshtasticd/ssl \
                /usr/share/meshtasticd/web \
-    # Pre-create the packet log (Logging.JSONFile in the shipped config) so
-    # an unprivileged `--user meshtasticd` run can append to it from first
-    # boot; it must be created BEFORE the chown below (a touch after the
-    # chown lands root:root 0644) and forced to 0600 because it contains
-    # decoded packet payloads.
+    # Pre-create the packet log base file (Logging.JSONFile in the shipped
+    # config) meshtasticd-owned and 0600: it must be created BEFORE the
+    # chown below (a touch after the chown lands root:root 0644) and forced
+    # to 0600 because it contains decoded packet payloads. With
+    # JSONFileRotate: 60 the data actually lands in the daemon-created
+    # timestamped sibling packets.json_<timestamp> in this
+    # meshtasticd-owned dir, so an unprivileged `--user meshtasticd` run
+    # can start logging from first boot.
     && touch /var/lib/meshtasticd/packets.json \
     && chown -R meshtasticd:meshtasticd /var/lib/meshtasticd \
     && chmod 600 /var/lib/meshtasticd/packets.json \
+    && [ "$(stat -c '%U:%G %a' /var/lib/meshtasticd/packets.json)" = "meshtasticd:meshtasticd 600" ] \
     # one-time self-signed HTTPS cert so the webserver can start out of the box.
     # Known limitation (documented, not re-architected): the key/cert are
     # baked into the image and therefore SHARED by every container of this

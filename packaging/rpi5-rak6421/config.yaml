@@ -23,13 +23,14 @@ Logging:
   # and persisted by the /var/lib/meshtasticd volume in Docker. No
   # separate TraceFile: the JSON log is the only log file this package
   # ships.
-  # Append-only and UNBOUNDED on purpose: JSONFileRotate is NOT set.
-  # At this firmware tag a non-zero JSONFileRotate makes the daemon exit
-  # at startup with "*** JSONFile open failure" (PortduinoGlue.cpp:688-699:
-  # the file is only opened when rotate==0, but the is_open() guard still
-  # fires). Re-enable rotation only together with the daemon-side fix.
-  # Prune /var/lib/meshtasticd/packets.json if you keep the box a while.
+  # Rotated every 60 min: at the first logged packet the daemon opens the
+  # timestamped sibling packets.json_<YYYYmmdd-HHMMSS> next to the base
+  # file (which stays empty), starting a new sibling every 60 min. The
+  # siblings are daemon-created with the daemon's umask — the systemd unit
+  # sets UMask=0077 so they land 0600 (container runs: see README). Prune
+  # the old siblings in /var/lib/meshtasticd if you keep the box a while.
   JSONFile: /var/lib/meshtasticd/packets.json
+  JSONFileRotate: 60
   JSONFilter: position
   AsciiLogs: true
 

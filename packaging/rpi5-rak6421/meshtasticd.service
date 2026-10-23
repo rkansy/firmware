@@ -19,6 +19,10 @@ Environment=HOME=/var/lib/meshtasticd
 ExecStart=/usr/bin/meshtasticd --config=/etc/meshtasticd/config.yaml --fsdir=/var/lib/meshtasticd
 Restart=always
 RestartSec=3
+# The 60-min-rotated packet-log siblings (packets.json_<timestamp>) are
+# daemon-created with the daemon's umask; the default 0022 would leave
+# decoded packet payloads world-readable (0644).
+UMask=0077
 # Light hardening (JSON packet log lives in the VFS dir per config)
 NoNewPrivileges=true
 PrivateTmp=true

@@ -694,7 +694,11 @@ void portduinoSetup()
             std::cout << "*** JSONFile Exception " << e.what() << std::endl;
             exit(EXIT_FAILURE);
         }
-        if (!JSONFile.is_open()) {
+        // The rotate == 0 path opens the file at startup, so a failed open
+        // must fail loudly here. With a non-zero JSONFileRotate nothing is
+        // opened at startup (the file is opened lazily at decode time,
+        // Router.cpp) — the startup failure check must not apply to it.
+        if (portduino_config.JSONFileRotate == 0 && !JSONFile.is_open()) {
             std::cout << "*** JSONFile open failure" << std::endl;
             exit(EXIT_FAILURE);
         }

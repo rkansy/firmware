@@ -57,15 +57,17 @@ ToRadio/FromRadio), so existing clients (`meshtastic` CLI/Python,
 ```
 
 Dedicated system user `meshtasticd` (no login). Ports: API **4403** (TCP),
-web UI **9443** (HTTPS). Packets are logged to
-`/var/lib/meshtasticd/packets.json` — the daemon's **single packet stream**
-(JSON, mode `0600`, filtered to position packets). There is no separate
-trace log; console output goes to the systemd journal (host) or container
-stdout (Docker). The log is **append-only and unbounded** at this firmware
-tag: daemon-side rotation (`JSONFileRotate`) is not usable — any non-zero
-value makes the daemon exit at startup (`*** JSONFile open failure`,
-`PortduinoGlue.cpp:688-699`), so the shipped config leaves it at 0. Prune
-the file (VFS dir / Docker volume) if you keep the box for a long time.
+web UI **9443** (HTTPS). Packets are logged to the daemon's **single packet
+stream** (JSON, filtered to position packets) under
+`/var/lib/meshtasticd/`, rotated every 60 min: at the first logged packet
+the daemon opens the timestamped sibling
+`packets.json_<YYYYmmdd-HHMMSS>` (the base `packets.json` stays empty),
+starting a fresh sibling every 60 min. The rotated siblings are
+daemon-created with the daemon's umask — the systemd unit sets `UMask=0077`
+so they land `0600` (container runs: note in the Docker section below). There
+is no separate trace log; console output goes to the systemd journal (host)
+or container stdout (Docker). Prune the old siblings (VFS dir / Docker
+volume) if you keep the box for a long time.
 
 ## Build
 
@@ -90,8 +92,12 @@ Options: `--web-tarball FILE` (skip the web download), `--skip-web`,
 idempotent and **never overwrites an existing config** — re-running it keeps
 your edits; pass `--force` to replace a config with the packaged version
 (each current file is backed up with a timestamp first). It also installs the
-daemon's runtime libraries (apt, no-op when already present) and verifies the
-binary runs, failing with an `ldd` list of missing libraries otherwise.
+daemon's full runtime library set — `libgpiod3 libyaml-cpp0.8 libi2c0
+libuv1t64 libusb-1.0-0 liborcania2.3 libulfius2.7t64 libssl3t64 libx11-6
+libinput10 libxkbcommon-x11-0 libsdl2-2.0-0 ca-certificates openssl` — the
+same 14 packages the reference image's runtime stage ships (apt, no-op when
+already present), and verifies the binary runs, failing with an `ldd` list of
+missing libraries otherwise.
 
 ## Docker
 
@@ -126,8 +132,23 @@ docker run --rm -it --net host \
     -v meshtasticd-vfs:/var/lib/meshtasticd meshtasticd-multi
 ```
 
-The packet log file is pre-created in the image (`0600`, owned by
-`meshtasticd`), so the unprivileged user can append to it from first boot.
+The packet-log base file is pre-created in the image (`0600`, owned by
+`meshtasticd`) and the VFS dir is `meshtasticd`-owned, so the unprivileged
+user can start logging from first boot — with `JSONFileRotate: 60` the data
+lands in the daemon-created `packets.json_<timestamp>` sibling in that dir.
+Note: the unit's `UMask=0077` has no direct `docker run` equivalent (the
+container process runs with the docker daemon's default umask 0022, so
+rotated siblings land `0644`). If the payload log must stay `0600` in a
+container, override the command with a umask wrapper, e.g.:
+
+```bash
+docker run --rm -it --net host \
+    --user meshtasticd --group-add spi --group-add gpio \
+    --device /dev/spidev0.0 --device /dev/gpiochip0 \
+    -v meshtasticd-vfs:/var/lib/meshtasticd \
+    meshtasticd-multi sh -c "umask 0077 && exec meshtasticd \
+        --config=/etc/meshtasticd/config.yaml --fsdir=/var/lib/meshtasticd"
+```
 
 **TLS note:** the self-signed web key/cert is generated at build time and is
 therefore *shared by every container of this image* (image contents can be
