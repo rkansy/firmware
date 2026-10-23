@@ -8,6 +8,7 @@
 #include "MemoryPool.h"
 #include "MeshRadio.h"
 #include "MeshTypes.h"
+#include "MultiClientHub.h"
 #include "Observer.h"
 #ifdef ARCH_PORTDUINO
 #include "PointerQueue.h"

@@ -466,6 +466,12 @@ PiWebServerThread::PiWebServerThread()
 {
     int ret, retssl, webservport;
 
+    // The web UI's HTTP API is another API client: in multi-client builds it
+    // participates in the hub (live-traffic fan-out + per-client id remap)
+    // exactly like a TCP client, so it doesn't starve when TCP clients are
+    // connected (the shared single-client queues are then bypassed).
+    webAPI.enableMultiClientDelivery();
+
     if (CheckSSLandLoad() != 0) {
         CreateSSLCertificate();
         if (CheckSSLandLoad() != 0) {

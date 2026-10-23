@@ -1,6 +1,8 @@
 #pragma once
 
+#include "MultiClientHub.h"
 #include "Observer.h"
+#include "PointerQueue.h"
 #include "concurrency/Lock.h"
 #include "mesh-pb-constants.h"
 #include "meshtastic/portnums.pb.h"
@@ -33,7 +35,8 @@
  * for that connection)
  */
 class PhoneAPI
-    : public Observer<uint32_t> // FIXME, we shouldn't be inheriting from Observer, instead use CallbackObserver as a member
+    : public Observer<uint32_t>, // FIXME, we shouldn't be inheriting from Observer, instead use CallbackObserver as a member
+      public MCDeliveryTarget
 {
     enum State {
         STATE_SEND_NOTHING, // Initial state, don't send anything until the client starts asking for config
@@ -95,6 +98,20 @@ class PhoneAPI
     uint32_t config_nonce = 0;
     uint32_t readIndex = 0;
 
+    // Flag to indicate a heartbeat was received and we should send queue status.
+    // Per-connection: with multiple concurrent clients a global flag would let
+    // one client steal another's queue-status reply.
+    bool heartbeatReceived = false;
+
+    /// Multi-client mode (our TCP daemon builds): this connection pulls FromRadio
+    /// items from its own per-connection queues, fed by the MultiClientHub, instead
+    /// of the single shared MeshService "to phone" queues.
+    bool multiClientEnabled = false;
+    PointerQueue<meshtastic_MeshPacket> mcPacketQueue;
+    PointerQueue<meshtastic_QueueStatus> mcQueueStatusQueue;
+    PointerQueue<meshtastic_MqttClientProxyMessage> mcMqttClientProxyQueue;
+    PointerQueue<meshtastic_ClientNotification> mcClientNotificationQueue;
+
     std::vector<meshtastic_FileInfo> filesManifest = {};
 
     void resetReadIndex() { readIndex = 0; }
@@ -137,6 +154,22 @@ class PhoneAPI
 
     bool isConnected() { return state != STATE_SEND_NOTHING; }
     bool isSendingPackets() { return state == STATE_SEND_PACKETS; }
+
+    /// Opt this connection into multi-client delivery. After this, FromRadio items
+    /// are pulled from this instance's private queues, which the MultiClientHub
+    /// feeds (fan-out + per-client packet id remapping).
+    void enableMultiClientDelivery()
+    {
+        multiClientEnabled = true;
+        multiClientHub.registerClient(this);
+    }
+    bool isMultiClient() const { return multiClientEnabled; }
+
+    /// Per-client delivery targets (MCDeliveryTarget), queued for this connection only.
+    void mcEnqueuePacket(meshtastic_MeshPacket *p) override;
+    void mcEnqueueQueueStatus(meshtastic_QueueStatus *q) override;
+    void mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage *m) override;
+    void mcEnqueueClientNotification(meshtastic_ClientNotification *n) override;
 
   protected:
     /// Our fromradio packet while it is being assembled

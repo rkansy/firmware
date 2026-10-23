@@ -229,6 +229,15 @@ ErrorCode MeshService::sendQueueStatusToPhone(const meshtastic_QueueStatus &qs, 
     copied->res = res;
     copied->mesh_packet_id = mesh_packet_id;
 
+    lastQueueStatus = *copied;
+
+    if (multiClientHub.active()) {
+        // Route to the client that sent the packet (id restored) or fan out
+        multiClientHub.deliverQueueStatus(copied);
+        fromNum++;
+        return ERRNO_OK;
+    }
+
     if (toPhoneQueueStatusQueue.numFree() == 0) {
         LOG_INFO("tophone queue status queue is full, discard oldest");
         meshtastic_QueueStatus *d = toPhoneQueueStatusQueue.dequeuePtr(0);
@@ -305,6 +314,14 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
 {
     perhapsDecode(p);
 
+    if (multiClientHub.active()) {
+        // Fan out to every connected client (with per-client id remapping);
+        // the hub takes ownership of p.
+        multiClientHub.deliverPacket(p);
+        fromNum++; // Notify observers (re)connect so they see new packets
+        return;
+    }
+
 #ifdef ARCH_ESP32
 #if !MESHTASTIC_EXCLUDE_STOREFORWARD
     if (moduleConfig.store_forward.enabled && storeForwardModule->isServer() &&
@@ -341,6 +358,13 @@ void MeshService::sendToPhone(meshtastic_MeshPacket *p)
 void MeshService::sendMqttMessageToClientProxy(meshtastic_MqttClientProxyMessage *m)
 {
     LOG_DEBUG("Send mqtt message on topic '%s' to client for proxy", m->topic);
+
+    if (multiClientHub.active()) {
+        multiClientHub.deliverMqttClientProxyMessage(m);
+        fromNum++;
+        return;
+    }
+
     if (toPhoneMqttProxyQueue.numFree() == 0) {
         LOG_WARN("MqttClientProxyMessagePool queue is full, discard oldest");
         meshtastic_MqttClientProxyMessage *d = toPhoneMqttProxyQueue.dequeuePtr(0);
@@ -373,6 +397,13 @@ void MeshService::sendRoutingErrorResponse(meshtastic_Routing_Error error, const
 void MeshService::sendClientNotification(meshtastic_ClientNotification *n)
 {
     LOG_DEBUG("Send client notification to phone");
+
+    if (multiClientHub.active()) {
+        multiClientHub.deliverClientNotification(n);
+        fromNum++;
+        return;
+    }
+
     if (toPhoneClientNotificationQueue.numFree() == 0) {
         LOG_WARN("ClientNotification queue is full, discard oldest");
         meshtastic_ClientNotification *d = toPhoneClientNotificationQueue.dequeuePtr(0);

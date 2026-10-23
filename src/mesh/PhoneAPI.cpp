@@ -33,9 +33,6 @@
 #include "Throttle.h"
 #include <RTC.h>
 
-// Flag to indicate a heartbeat was received and we should send queue status
-bool heartbeatReceived = false;
-
 namespace
 {
 constexpr uint8_t FILES_MANIFEST_LEVELS = 3;
@@ -48,6 +45,8 @@ void releaseFilesManifest(std::vector<meshtastic_FileInfo> &filesManifest)
 } // namespace
 
 PhoneAPI::PhoneAPI()
+    : mcPacketQueue(MAX_RX_TOPHONE), mcQueueStatusQueue(MAX_RX_QUEUESTATUS_TOPHONE),
+      mcMqttClientProxyQueue(MAX_RX_MQTTPROXY_TOPHONE), mcClientNotificationQueue(MAX_RX_NOTIFICATION_TOPHONE)
 {
     lastContactMsec = millis();
     std::fill(std::begin(recentToRadioPacketIds), std::end(recentToRadioPacketIds), 0);
@@ -73,6 +72,8 @@ void PhoneAPI::handleStartConfig()
     onConfigStart();
 
     // even if we were already connected - restart our state machine
+    if (multiClientEnabled)
+        multiClientHub.registerClient(this); // reconnect after a ToRadio.disconnect
     if (config_nonce == SPECIAL_NONCE_ONLY_NODES) {
         // If client only wants node info, jump directly to sending nodes
         state = STATE_SEND_OWN_NODEINFO;
@@ -112,6 +113,24 @@ void PhoneAPI::handleStartConfig()
 void PhoneAPI::close()
 {
     LOG_DEBUG("PhoneAPI::close()");
+    if (multiClientEnabled) {
+        // Leave the hub before releasing our per-client queue contents.
+        // The opt-in flag stays set: a reconnect (want_config on the same
+        // link) re-registers in handleStartConfig().
+        multiClientHub.unregisterClient(this);
+        meshtastic_MeshPacket *mp;
+        while ((mp = mcPacketQueue.dequeuePtr(0)) != nullptr)
+            service->releaseToPool(mp);
+        meshtastic_QueueStatus *qs;
+        while ((qs = mcQueueStatusQueue.dequeuePtr(0)) != nullptr)
+            service->releaseQueueStatusToPool(qs);
+        meshtastic_MqttClientProxyMessage *mq;
+        while ((mq = mcMqttClientProxyQueue.dequeuePtr(0)) != nullptr)
+            service->releaseMqttClientProxyMessageToPool(mq);
+        meshtastic_ClientNotification *cn;
+        while ((cn = mcClientNotificationQueue.dequeuePtr(0)) != nullptr)
+            service->releaseClientNotificationToPool(cn);
+    }
     if (service->api_state == service->STATE_BLE && api_type == TYPE_BLE)
         service->api_state = service->STATE_DISCONNECTED;
     else if (service->api_state == service->STATE_WIFI && api_type == TYPE_WIFI)
@@ -711,6 +730,56 @@ void PhoneAPI::releaseClientNotification()
     }
 }
 
+void PhoneAPI::mcEnqueuePacket(meshtastic_MeshPacket *p)
+{
+    if (mcPacketQueue.numFree() == 0) {
+        if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP || p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP) {
+            LOG_WARN("MultiClient: packet queue full, discard oldest");
+            meshtastic_MeshPacket *d = mcPacketQueue.dequeuePtr(0);
+            if (d)
+                service->releaseToPool(d);
+        } else {
+            LOG_WARN("MultiClient: packet queue full, drop packet");
+            service->releaseToPool(p);
+            return;
+        }
+    }
+    mcPacketQueue.enqueue(p, 0);
+}
+
+void PhoneAPI::mcEnqueueQueueStatus(meshtastic_QueueStatus *q)
+{
+    if (mcQueueStatusQueue.numFree() == 0) {
+        LOG_WARN("MultiClient: queue-status queue full, discard oldest");
+        meshtastic_QueueStatus *d = mcQueueStatusQueue.dequeuePtr(0);
+        if (d)
+            service->releaseQueueStatusToPool(d);
+    }
+    mcQueueStatusQueue.enqueue(q, 0);
+}
+
+void PhoneAPI::mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage *m)
+{
+    if (mcMqttClientProxyQueue.numFree() == 0) {
+        LOG_WARN("MultiClient: mqtt proxy queue full, discard oldest");
+        meshtastic_MqttClientProxyMessage *d = mcMqttClientProxyQueue.dequeuePtr(0);
+        if (d)
+            service->releaseMqttClientProxyMessageToPool(d);
+    }
+    mcMqttClientProxyQueue.enqueue(m, 0);
+}
+
+void PhoneAPI::mcEnqueueClientNotification(meshtastic_ClientNotification *n)
+{
+    if (mcClientNotificationQueue.numFree() == 0) {
+        LOG_WARN("MultiClient: notification queue full, discard oldest");
+        meshtastic_ClientNotification *d = mcClientNotificationQueue.dequeuePtr(0);
+        if (d)
+            service->releaseClientNotificationToPool(d);
+    }
+    mcClientNotificationQueue.enqueue(n, 0);
+}
+
 /**
  * Return true if we have data available to send to the phone
  */
@@ -742,6 +811,20 @@ bool PhoneAPI::available()
         prefetchNodeInfos();
         return true;
     case STATE_SEND_PACKETS: {
+        if (multiClientEnabled) {
+            // Per-connection queues fed by the MultiClientHub (fan-out + id remap).
+            // XModem file transfer is not served in multi-client mode (the HTTPS
+            // webserver covers file access on the daemon).
+            if (!queueStatusPacketForPhone)
+                queueStatusPacketForPhone = mcQueueStatusQueue.dequeuePtr(0);
+            if (!mqttClientProxyMessageForPhone)
+                mqttClientProxyMessageForPhone = mcMqttClientProxyQueue.dequeuePtr(0);
+            if (!clientNotification)
+                clientNotification = mcClientNotificationQueue.dequeuePtr(0);
+            if (!packetForPhone)
+                packetForPhone = mcPacketQueue.dequeuePtr(0);
+            return !!(queueStatusPacketForPhone || mqttClientProxyMessageForPhone || clientNotification || packetForPhone);
+        }
         if (!queueStatusPacketForPhone)
             queueStatusPacketForPhone = service->getQueueStatusForPhone();
         if (!mqttClientProxyMessageForPhone)
@@ -824,6 +907,13 @@ bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
             LOG_DEBUG("Ignore packet from phone, already seen recently");
             return false;
         }
+
+    // Multi-client: remap the client's packet id to a server-unique id so
+    // concurrent clients cannot produce colliding mesh packet ids; matching
+    // responses (routing ACK/NAK, queue status, notifications) are routed back
+    // to this connection with the original id restored.
+    if (multiClientEnabled && p.id != 0)
+        p.id = multiClientHub.registerPacket(this, p.id);
 
     if (p.decoded.portnum == meshtastic_PortNum_TRACEROUTE_APP && lastPortNumToRadio[p.decoded.portnum] &&
         Throttle::isWithinTimespanMs(lastPortNumToRadio[p.decoded.portnum], THIRTY_SECONDS_MS)) {
