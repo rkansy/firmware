@@ -111,6 +111,10 @@ LinuxBluetooth *linuxBluetooth = nullptr;
 #include "linux/LinuxHardwareI2C.h"
 #ifndef ARCH_PORTDUINO_WASM // raspi HTTP server (ulfius/zlib/openssl) excluded in the browser/wasm build
 #include "mesh/raspihttp/PiWebServer.h"
+#if defined(PORTDUINO_LINUX_HARDWARE) && __has_include(<ulfius.h>) && __has_include(<jansson.h>)
+#include "mesh/raspihttp/McpServer.h"
+MeshtasticMcpServer *mcpServer = nullptr;
+#endif
 #include "platform/portduino/NativeDiscovery.h"
 #endif
 #include "platform/portduino/PortduinoGlue.h"
@@ -1231,6 +1235,21 @@ void setup()
     }
 #endif
     initApiServer(TCPPort);
+#if defined(PORTDUINO_LINUX_HARDWARE) && __has_include(<ulfius.h>) && __has_include(<jansson.h>)
+    if (portduino_config.mcp_port > 0) {
+        mcpServer = new MeshtasticMcpServer(portduino_config.mcp_port);
+        std::atexit([] {
+            if (mcpServer) {
+                mcpServer->shutdown();
+                delete mcpServer;
+                mcpServer = nullptr;
+            }
+        });
+    }
+#elif defined(PORTDUINO_LINUX_HARDWARE)
+    if (portduino_config.mcp_port > 0)
+        LOG_WARN("MCP server not built; install Ulfius and Jansson development files to enable it");
+#endif
 #ifndef ARCH_PORTDUINO_WASM
     startNativeDiscovery(TCPPort);
 #endif

@@ -76,7 +76,8 @@ const std::map<std::string, std::set<std::string>> &schema()
           "SX126X_ANT_SW",
           "GPIO_DETECT_PA"}},
         {"General",
-         {"MACAddress", "MACAddressSource", "MaxNodes", "MaxMessageQueue", "APIPort", "ConfigDirectory", "AvailableDirectory"}},
+         {"MACAddress", "MACAddressSource", "MaxNodes", "MaxMessageQueue", "APIPort", "MCPPort", "ConfigDirectory",
+          "AvailableDirectory"}},
         {"Config", {"DisplayMode", "EnableUDP", "StatusMessage"}},
         {"Security", {"AdminKeys"}},
         {"Display",
@@ -602,6 +603,7 @@ const std::map<std::string, ValueSpec> &valueSpecs()
         {"General.MaxNodes", {kInt, false}},
         {"General.MaxMessageQueue", {kInt, false}},
         {"General.APIPort", {kInt, false}},
+        {"General.MCPPort", {kInt, false}},
         {"General.ConfigDirectory", {kString, false}},
         {"General.AvailableDirectory", {kString, false}},
         {"Config.DisplayMode", {kString, false}},
@@ -1300,6 +1302,11 @@ void checkMergedConfig(const PathIndex &paths, std::vector<Finding> &findings)
     if (portduino_config.webserverport != -1 && (portduino_config.webserverport <= 0 || portduino_config.webserverport >= 65536))
         findings.push_back({kError, merged, 0,
                             "Webserver.Port " + std::to_string(portduino_config.webserverport) + " is not a usable TCP port"});
+
+    if (portduino_config.mcp_port != 0 && (portduino_config.mcp_port < 1024 || portduino_config.mcp_port >= 65536))
+        findings.push_back({kError, merged, 0,
+                            "General.MCPPort " + std::to_string(portduino_config.mcp_port) +
+                                " is not a usable TCP port (use 0 to disable or 1024-65535)"});
 
     if (portduino_config.MaxNodes <= 0)
         findings.push_back({kError, merged, 0,

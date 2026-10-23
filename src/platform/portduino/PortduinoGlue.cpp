@@ -1531,6 +1531,8 @@ bool loadConfig(const char *configPath)
             portduino_config.config_directory = (yamlConfig["General"]["ConfigDirectory"]).as<std::string>("");
             portduino_config.available_directory =
                 (yamlConfig["General"]["AvailableDirectory"]).as<std::string>("/etc/meshtasticd/available.d/");
+            if (yamlConfig["General"]["MCPPort"].IsDefined())
+                portduino_config.mcp_port = yamlConfig["General"]["MCPPort"].as<int>(portduino_config.mcp_port);
             if ((yamlConfig["General"]["MACAddress"]).as<std::string>("") != "" &&
                 (yamlConfig["General"]["MACAddressSource"]).as<std::string>("") != "") {
                 // --check reports this as a finding against the file it came from, so

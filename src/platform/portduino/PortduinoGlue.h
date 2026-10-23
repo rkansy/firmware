@@ -325,6 +325,7 @@ extern struct portduino_config_struct {
     bool mac_address_explicit = false;
     std::string mac_address_source = "";
     int api_port = -1;
+    int mcp_port = 0;
     std::string config_directory = "";
     std::string available_directory = "/etc/meshtasticd/available.d/";
     int maxtophone = 100;
@@ -771,6 +772,7 @@ extern struct portduino_config_struct {
             out << YAML::Key << "ConfigDirectory" << YAML::Value << config_directory;
         if (api_port != -1)
             out << YAML::Key << "TCPPort" << YAML::Value << api_port;
+        out << YAML::Key << "MCPPort" << YAML::Value << mcp_port;
         if (mac_address_explicit)
             out << YAML::Key << "MACAddress" << YAML::Value << mac_address;
         if (mac_address_source != "")
