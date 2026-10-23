@@ -151,15 +151,34 @@ stable and documented.
 
 ## Verify (concurrent clients)
 
-With the daemon running (hardware or `-s` sim mode), run:
+With the daemon running, run the smoke test — pass `-s` **iff** the daemon
+was started in sim mode (`meshtasticd -s`):
 
 ```bash
 pip install meshtastic   # only for the bundled protobufs
+# hardware daemon:
 python3 packaging/rpi5-rak6421/smoke_multiclient.py
+# sim daemon (meshtasticd -s):
+python3 packaging/rpi5-rak6421/smoke_multiclient.py -s
 ```
 
-The script connects **two** clients simultaneously to TCP 4403 and checks:
+The script connects **two** clients simultaneously to the TCP API port
+(`--host` / `--port`, default `127.0.0.1:4403`) and checks:
 independent config handshakes (per-client `config_complete_id`), per-client
-queue-status id remapping, live-traffic fan-out, owner-only response routing,
-and that dropping one client leaves the other untouched. Exit code 0 = all
-checks passed.
+queue-status id remapping — including a **same-id collision** (both clients
+send the same client-assigned id) and a **`want_ack` DM** whose routing
+NAK must reach only the sender with the id restored — live-traffic fan-out,
+owner-only response routing, and that dropping one client leaves the other
+untouched.
+
+**Which sections apply where:** sections 2 (own echo) and 3 (live-traffic
+fan-out) are **sim-only** — on stock code the multi-client fan-out is only
+triggered by the radio RX path, and the simulated radio is the only one that
+echoes sent packets back; on hardware they would just time out. On hardware
+they are skipped (not counted); the script prints the applicable section
+list at startup. All other sections (1, 4-8) run on both hardware and sim.
+
+**Exit codes:** `0` = all *applicable* checks passed, `1` = one or more
+checks failed (a `FAILS` summary is printed), `2` = setup failure
+(daemon unreachable / protobufs missing — a friendly message, not a
+traceback).
