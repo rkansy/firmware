@@ -80,6 +80,15 @@ install -d -o meshtasticd -g meshtasticd /var/lib/meshtasticd
 install -d /etc/meshtasticd/config.d /etc/meshtasticd/available.d /etc/meshtasticd/ssl
 install -d -g meshtasticd /usr/share/meshtasticd/web
 
+echo "== log file =="
+# The shipped config sets Logging.TraceFile; the daemon exits(1) at startup if
+# the file is not writable by the service user (PortduinoGlue: "traceFile open
+# failure"). Create it once; never truncate an existing log on re-install.
+if [[ ! -e /var/log/meshtasticd.json ]]; then
+    install -o meshtasticd -g meshtasticd -m 0644 /dev/null /var/log/meshtasticd.json
+fi
+chown meshtasticd:meshtasticd /var/log/meshtasticd.json
+
 echo "== binary =="
 install -m 0755 "$BINARY" /usr/bin/meshtasticd
 /usr/bin/meshtasticd --version || true

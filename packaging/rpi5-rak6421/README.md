@@ -85,6 +85,10 @@ docker run --rm -it --net host \
 Runs as root inside the container (spidev/gpio device access); the dedicated
 `meshtasticd` user + VFS layout are still created inside the image.
 
+**MAC note:** the container has no hardware MAC, so the daemon needs a
+resolvable MAC to derive its node ID — set `MACAddress` in `config.yaml`, or
+`MACAddressSource: <iface>` under `General:`.
+
 ## Verify (concurrent clients)
 
 With the daemon running (hardware or `-s` sim mode), run:
