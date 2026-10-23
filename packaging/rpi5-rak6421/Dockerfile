@@ -21,9 +21,12 @@
 #
 # The container runs as root by default because the SX1262 on spidev0.0 and the
 # libgpiod pins need elevated access inside a container. For an
-# unprivileged run, use the in-image 'meshtasticd' user plus the host device
+# unprivileged run, use the in-image 'meshtasticd' user plus the device
 # groups (device nodes must be group-accessible — stock trixie udev gives
-# spidev* / ttyAMA0 / gpiochip* mode 0660 in groups spi / dialout / gpio):
+# spidev* / ttyAMA0 / gpiochip* mode 0660 in groups spi / dialout / gpio).
+# Precondition: `--group-add` only works if the group exists in the image —
+# stock RPi OS trixie has spi/gpio, a minimal debian:trixie(-slim) build may
+# not; create them in the image (groupadd spi gpio) or run as root.
 #   docker run --rm -it --net host \
 #     --user meshtasticd --group-add spi --group-add gpio \
 #     --device /dev/spidev0.0 --device /dev/gpiochip0 \
@@ -86,11 +89,14 @@ RUN apt-get update && apt-get --no-install-recommends -y install \
                /etc/meshtasticd/available.d \
                /etc/meshtasticd/ssl \
                /usr/share/meshtasticd/web \
-    && chown -R meshtasticd:meshtasticd /var/lib/meshtasticd \
     # Pre-create the packet log (Logging.JSONFile in the shipped config) so
     # an unprivileged `--user meshtasticd` run can append to it from first
-    # boot; 0600 because it contains decoded packet payloads.
+    # boot; it must be created BEFORE the chown below (a touch after the
+    # chown lands root:root 0644) and forced to 0600 because it contains
+    # decoded packet payloads.
     && touch /var/lib/meshtasticd/packets.json \
+    && chown -R meshtasticd:meshtasticd /var/lib/meshtasticd \
+    && chmod 600 /var/lib/meshtasticd/packets.json \
     # one-time self-signed HTTPS cert so the webserver can start out of the box.
     # Known limitation (documented, not re-architected): the key/cert are
     # baked into the image and therefore SHARED by every container of this

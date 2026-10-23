@@ -108,7 +108,9 @@ echo "== runtime libraries =="
 apt-get update -qq >/dev/null 2>&1 || true
 if ! apt-get install --no-install-recommends -y \
       libgpiod3 libyaml-cpp0.8 libi2c0 libuv1t64 libusb-1.0-0 \
-      liborcania2.3 libulfius2.7t64 libssl3t64 ca-certificates openssl; then
+      liborcania2.3 libulfius2.7t64 libssl3t64 \
+      libx11-6 libinput10 libxkbcommon-x11-0 libsdl2-2.0-0 \
+      ca-certificates openssl; then
   echo "WARNING: apt could not install the runtime library set (non-trixie host?)" >&2
   echo "         continuing — the --version/ldd check below will catch gaps" >&2
 fi

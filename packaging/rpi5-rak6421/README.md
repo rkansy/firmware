@@ -59,11 +59,13 @@ ToRadio/FromRadio), so existing clients (`meshtastic` CLI/Python,
 Dedicated system user `meshtasticd` (no login). Ports: API **4403** (TCP),
 web UI **9443** (HTTPS). Packets are logged to
 `/var/lib/meshtasticd/packets.json` — the daemon's **single packet stream**
-(JSON, rotated by the daemon every 60 min, filtered to position packets).
-There is no separate trace log; console output goes to the systemd journal
-(host) or container stdout (Docker). Rotation keeps the active file bounded,
-but the `packets.json_<timestamp>` siblings accumulate in the VFS dir — prune
-them if you keep the box for a long time.
+(JSON, mode `0600`, filtered to position packets). There is no separate
+trace log; console output goes to the systemd journal (host) or container
+stdout (Docker). The log is **append-only and unbounded** at this firmware
+tag: daemon-side rotation (`JSONFileRotate`) is not usable — any non-zero
+value makes the daemon exit at startup (`*** JSONFile open failure`,
+`PortduinoGlue.cpp:688-699`), so the shipped config leaves it at 0. Prune
+the file (VFS dir / Docker volume) if you keep the box for a long time.
 
 ## Build
 
@@ -108,9 +110,14 @@ docker run --rm -it --net host \
 
 Runs as root inside the container (spidev/gpio device access); the dedicated
 `meshtasticd` user + VFS layout are still created inside the image. For an
-unprivileged run, use the in-image user *and* the host device groups (device
+unprivileged run, use the in-image user *and* the device groups (device
 nodes must be group-accessible — stock trixie udev gives `spidev*` / `ttyAMA0`
 / `gpiochip*` mode 0660 in groups `spi` / `dialout` / `gpio`):
+
+**Precondition:** `--group-add` only works if the group exists **in the
+image** — stock RPi OS trixie has `spi`/`gpio`; a minimal `debian:trixie`
+(-slim) build may not. Create them in the image (`groupadd spi gpio`) or
+run as root.
 
 ```bash
 docker run --rm -it --net host \
@@ -119,8 +126,8 @@ docker run --rm -it --net host \
     -v meshtasticd-vfs:/var/lib/meshtasticd meshtasticd-multi
 ```
 
-The packet log file is pre-created in the image, so the unprivileged user can
-append to it from first boot.
+The packet log file is pre-created in the image (`0600`, owned by
+`meshtasticd`), so the unprivileged user can append to it from first boot.
 
 **TLS note:** the self-signed web key/cert is generated at build time and is
 therefore *shared by every container of this image* (image contents can be
@@ -152,7 +159,10 @@ stable and documented.
 ## Verify (concurrent clients)
 
 With the daemon running, run the smoke test — pass `-s` **iff** the daemon
-was started in sim mode (`meshtasticd -s`):
+was started in sim mode (`meshtasticd -s`). Note: in sim mode the daemon
+does **not** read `config.yaml` at all (stock `portduino` behavior — sim
+returns before config loading), so a sim run exercises built-in defaults
+(API port 4403 anyway) and does **not** test the shipped config:
 
 ```bash
 pip install meshtastic   # only for the bundled protobufs
