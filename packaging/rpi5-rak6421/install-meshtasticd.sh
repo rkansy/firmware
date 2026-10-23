@@ -19,6 +19,8 @@
 #   --skip-web           do not install web assets (webserver will not start)
 #   --skip-ssl           do not generate a self-signed cert (bring your own)
 #   --start              systemctl start meshtasticd when done
+#   --force              replace existing configs with the packaged versions
+#                        (each current file is backed up with a timestamp first)
 #
 set -euo pipefail
 
@@ -30,6 +32,7 @@ WEB_TARBALL=""
 SKIP_WEB=0
 SKIP_SSL=0
 START=0
+FORCE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --skip-web) SKIP_WEB=1; shift ;;
     --skip-ssl) SKIP_SSL=1; shift ;;
     --start) START=1; shift ;;
+    --force) FORCE=1; shift ;;
     --*) echo "unknown option: $1" >&2; exit 2 ;;
     *)
       if [[ -n "$BINARY" ]]; then echo "unexpected argument: $1" >&2; exit 2; fi
@@ -45,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$BINARY" || ! -f "$BINARY" ]]; then
-  echo "usage: sudo $0 /path/to/meshtasticd [--web-tarball FILE] [--skip-web] [--skip-ssl] [--start]" >&2
+  echo "usage: sudo $0 /path/to/meshtasticd [--web-tarball FILE] [--skip-web] [--skip-ssl] [--start] [--force]" >&2
   exit 2
 fi
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -80,25 +84,58 @@ install -d -o meshtasticd -g meshtasticd /var/lib/meshtasticd
 install -d /etc/meshtasticd/config.d /etc/meshtasticd/available.d /etc/meshtasticd/ssl
 install -d -g meshtasticd /usr/share/meshtasticd/web
 
-echo "== log file =="
-# The shipped config sets Logging.TraceFile; the daemon exits(1) at startup if
-# the file is not writable by the service user (PortduinoGlue: "traceFile open
-# failure"). Create it once; never truncate an existing log on re-install.
-if [[ ! -e /var/log/meshtasticd.json ]]; then
-    install -o meshtasticd -g meshtasticd -m 0644 /dev/null /var/log/meshtasticd.json
+echo "== packet log file =="
+# The shipped config sets Logging.JSONFile in the VFS dir; the file contains
+# full decoded packet payloads, so it must stay 0600. Enforce ownership and
+# mode on FIRST install and on EVERY re-install (an existing file with wrong
+# permissions would otherwise stay broken for the service user), but never
+# truncate an existing log. A symlink at this path is refused outright.
+PACKETS_LOG=/var/lib/meshtasticd/packets.json
+if [[ -L "$PACKETS_LOG" ]]; then
+  echo "ERROR: $PACKETS_LOG is a symlink — refusing to install over it. Remove it and re-run." >&2
+  exit 1
 fi
-chown meshtasticd:meshtasticd /var/log/meshtasticd.json
+if [[ ! -e "$PACKETS_LOG" ]]; then
+  install -o meshtasticd -g meshtasticd -m 0600 /dev/null "$PACKETS_LOG"
+fi
+chown meshtasticd:meshtasticd "$PACKETS_LOG"
+chmod 0600 "$PACKETS_LOG"
+
+echo "== runtime libraries =="
+# Same set the reference image installs (see packaging/rpi5-rak6421/Dockerfile
+# and the root Dockerfile). On a host that already has them apt is a no-op;
+# on a minimal trixie host this is what lets the service actually start.
+apt-get update -qq >/dev/null 2>&1 || true
+if ! apt-get install --no-install-recommends -y \
+      libgpiod3 libyaml-cpp0.8 libi2c0 libuv1t64 libusb-1.0-0 \
+      liborcania2.3 libulfius2.7t64 libssl3t64 ca-certificates openssl; then
+  echo "WARNING: apt could not install the runtime library set (non-trixie host?)" >&2
+  echo "         continuing — the --version/ldd check below will catch gaps" >&2
+fi
 
 echo "== binary =="
 install -m 0755 "$BINARY" /usr/bin/meshtasticd
-/usr/bin/meshtasticd --version || true
+# Verify the binary actually runs — a missing shared library must fail HERE
+# with an actionable message, not as a flapping service at boot.
+if ! /usr/bin/meshtasticd --version; then
+  echo "ERROR: /usr/bin/meshtasticd --version failed. Missing shared libraries?" >&2
+  ldd /usr/bin/meshtasticd 2>/dev/null | grep -F "not found" >&2 || true
+  exit 1
+fi
 
 echo "== config =="
+# Idempotent and non-destructive: existing configs are NEVER overwritten on a
+# re-run. Pass --force to replace them with the packaged versions — the
+# current file is backed up with a timestamp before each replacement.
 install_config() {
   local src="$1" dst="$2"
-  if [[ -e "$dst" && ! -e "${dst}.dist" ]]; then
-    cp -a "$dst" "${dst}.dist"   # keep a pristine copy of the pre-existing file
-    echo "  existing $dst preserved as ${dst}.dist"
+  if [[ -e "$dst" && "$FORCE" -ne 1 ]]; then
+    echo "  keeping existing $dst (use --force to replace it)"
+    return 0
+  fi
+  if [[ -e "$dst" ]]; then
+    cp -a "$dst" "${dst}.bak-$(date +%Y%m%d-%H%M%S)"
+    echo "  existing $dst backed up, replacing"
   fi
   install -m 0644 "$src" "$dst"
 }
@@ -119,9 +156,12 @@ if [[ "$SKIP_WEB" -eq 0 ]]; then
   else
     local_ver="$(cat "$REPO_ROOT/bin/web.version" 2>/dev/null || echo 2.6.7)"
     echo "  downloading web v${local_ver} ..."
-    curl -fL "https://github.com/meshtastic/web/releases/download/v${local_ver}/build.tar" -o /tmp/meshtastic-web.tar
-    tar -xf /tmp/meshtastic-web.tar -C /usr/share/meshtasticd/web/
-    rm -f /tmp/meshtastic-web.tar
+    # Private temp dir: never a fixed /tmp path, which a local user could
+    # pre-create as a symlink while we run as root.
+    dl_dir="$(mktemp -d)"
+    trap 'rm -rf "$dl_dir"' EXIT
+    curl -fL "https://github.com/meshtastic/web/releases/download/v${local_ver}/build.tar" -o "$dl_dir/web.tar"
+    tar -xf "$dl_dir/web.tar" -C /usr/share/meshtasticd/web/
   fi
   find /usr/share/meshtasticd/web -name '*.gz' -exec gzip -d {} \; 2>/dev/null || true
   chmod -R a+rX /usr/share/meshtasticd/web
@@ -130,12 +170,20 @@ else
 fi
 
 echo "== ssl =="
-if [[ "$SKIP_SSL" -eq 0 && ! -f /etc/meshtasticd/ssl/private_key.pem ]]; then
+SSL_KEY=/etc/meshtasticd/ssl/private_key.pem
+SSL_CERT=/etc/meshtasticd/ssl/certificate.pem
+# Validate the PAIR, not just the key: a half-generated pair (e.g. from an
+# interrupted run) must be regenerated, not silently kept.
+if [[ "$SKIP_SSL" -eq 0 && ! ( -f "$SSL_KEY" && -f "$SSL_CERT" ) ]]; then
+  if [[ -f "$SSL_KEY" || -f "$SSL_CERT" ]]; then
+    echo "  incomplete SSL pair found — removing orphan file(s) and regenerating"
+    rm -f "$SSL_KEY" "$SSL_CERT"
+  fi
   CN="$(hostname)"
   openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
-    -keyout /etc/meshtasticd/ssl/private_key.pem \
-    -out /etc/meshtasticd/ssl/certificate.pem \
-    -subj "/CN=${CN}" 2>/dev/null
+    -keyout "$SSL_KEY" \
+    -out "$SSL_CERT" \
+    -subj "/CN=${CN}"
   echo "  generated self-signed cert for CN=${CN}"
 fi
 chown -R meshtasticd:meshtasticd /etc/meshtasticd/ssl
@@ -146,7 +194,7 @@ chmod 600 /etc/meshtasticd/ssl/private_key.pem 2>/dev/null || true
 have_systemd() {
   command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]
 }
-sysctl() {
+run_systemctl() {
   if have_systemd; then
     systemctl "$@"
   else
@@ -157,8 +205,8 @@ sysctl() {
 
 echo "== systemd =="
 install -m 0644 "$SCRIPT_DIR/meshtasticd.service" /etc/systemd/system/meshtasticd.service
-sysctl daemon-reload
-sysctl enable meshtasticd.service
+run_systemctl daemon-reload
+run_systemctl enable meshtasticd.service
 
 echo
 echo "== done =="
@@ -166,9 +214,9 @@ echo "  VFS:            /var/lib/meshtasticd (user: meshtasticd)"
 echo "  API (TCP):      4403  (multi-client: N concurrent clients supported)"
 echo "  Web UI (HTTPS): 9443"
 if [[ "$START" -eq 1 ]]; then
-  sysctl start meshtasticd.service
+  run_systemctl start meshtasticd.service
   sleep 3
-  sysctl --no-pager status meshtasticd.service || true
+  run_systemctl --no-pager status meshtasticd.service || true
   echo
   echo "concurrent-client smoke test:"
   echo "  python3 $SCRIPT_DIR/smoke_multiclient.py"
