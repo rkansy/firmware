@@ -9,12 +9,17 @@ StartLimitBurst=5
 Type=simple
 User=meshtasticd
 Group=meshtasticd
+# Device access for radio + GPS. Verified on stock trixie / the reference
+# node: /dev/spidev0.0 -> group spi, /dev/ttyAMA0 -> group dialout,
+# /dev/gpiochip* -> group gpio, all mode 0660 — so group membership is
+# sufficient, no udev rule changes needed.
+SupplementaryGroups=dialout spi gpio
 # VFS home (prefs: channels/config/device/module/nodes.proto, transmit history)
 Environment=HOME=/var/lib/meshtasticd
 ExecStart=/usr/bin/meshtasticd --config=/etc/meshtasticd/config.yaml --fsdir=/var/lib/meshtasticd
 Restart=always
 RestartSec=3
-# Light hardening (JSON packet log lives at /packets.json per config)
+# Light hardening (JSON packet log lives in the VFS dir per config)
 NoNewPrivileges=true
 PrivateTmp=true
 

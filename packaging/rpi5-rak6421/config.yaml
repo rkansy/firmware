@@ -18,9 +18,12 @@ GPS:
 
 Logging:
   LogLevel: info
-  TraceFile: /var/log/meshtasticd.json
-  # JSON packet logging (rotated every 60 min, filtered to position packets)
-  JSONFile: /packets.json
+  # Single packet stream: the JSON packet log (rotated every 60 min by the
+  # daemon, filtered to position packets). It lives in the VFS dir so it is
+  # owned by user 'meshtasticd' and persisted by the /var/lib/meshtasticd
+  # volume in Docker. No separate TraceFile: the JSON log is the only log
+  # file this package ships.
+  JSONFile: /var/lib/meshtasticd/packets.json
   JSONFileRotate: 60
   JSONFilter: position
   AsciiLogs: true
@@ -32,6 +35,15 @@ Webserver:
   SSLCert: /etc/meshtasticd/ssl/certificate.pem
 
 General:
+  # Node MAC — required, not optional. Without an explicit MAC the daemon
+  # falls back to hardware autoconf (skipped here: the config.d profile pins
+  # Lora.Module: sx1262) and then to the Bluetooth HCI adapter. That BT
+  # fallback is dead on hosts with BT disabled (the usual way to free
+  # /dev/ttyAMA0 for the serial GPS) and inside containers with their own
+  # network namespace — in every such case the daemon prints "Blank MAC
+  # Address not allowed!" and exits. This value mirrors the reference node
+  # k4nsy-long (its live node ID); change it when deploying elsewhere.
+  MACAddress: 88:A2:9E:8B:80:5D
   APIPort: 4403
   MaxNodes: 512
   MaxMessageQueue: 100
