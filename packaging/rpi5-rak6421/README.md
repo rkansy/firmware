@@ -10,6 +10,16 @@ Target hardware mirrors the reference node **k4nsy-long**:
 Raspberry Pi 5, Debian trixie, RAK6421 (SX1262) in HAT slot 1 via
 `spidev0.0` + libgpiod, serial GPS on `/dev/ttyAMA0`.
 
+The active profile (`config.d/lora-RAK6421-13300-slot1.yaml`) carries the
+RAK13300-in-HAT-slot-1 pin mapping observed on k4nsy-long: IRQ 22 (IO6),
+Reset 16 (IO4), Busy 24 (IO5), Ant_sw 13 (IO3), CS 8.
+
+**config.d merge semantics:** *every* `*.yaml` file in `config.d/` is merged
+on top of the main config at startup, in directory read order (filesystem
+order, not guaranteed alphabetical), last file wins per key. Dropping a
+second radio profile in will override the first's keys — keep exactly one
+active profile.
+
 ## What is different from stock
 
 The TCP API on port **4403** accepts **N concurrent clients**. Stock
@@ -47,9 +57,13 @@ ToRadio/FromRadio), so existing clients (`meshtastic` CLI/Python,
 ```
 
 Dedicated system user `meshtasticd` (no login). Ports: API **4403** (TCP),
-web UI **9443** (HTTPS). JSON packet logging to `/packets.json` (rotated
-every 60 min, filtered to position packets) and trace log to
-`/var/log/meshtasticd.json`.
+web UI **9443** (HTTPS). Packets are logged to
+`/var/lib/meshtasticd/packets.json` — the daemon's **single packet stream**
+(JSON, rotated by the daemon every 60 min, filtered to position packets).
+There is no separate trace log; console output goes to the systemd journal
+(host) or container stdout (Docker). Rotation keeps the active file bounded,
+but the `packets.json_<timestamp>` siblings accumulate in the VFS dir — prune
+them if you keep the box for a long time.
 
 ## Build
 
@@ -70,10 +84,20 @@ sudo ./packaging/rpi5-rak6421/install-meshtasticd.sh \
 ```
 
 Options: `--web-tarball FILE` (skip the web download), `--skip-web`,
-`--skip-ssl` (bring your own cert), `--start`. The script is idempotent and
-preserves any pre-existing config as `<file>.dist`.
+`--skip-ssl` (bring your own cert), `--start`, `--force`. The script is
+idempotent and **never overwrites an existing config** — re-running it keeps
+your edits; pass `--force` to replace a config with the packaged version
+(each current file is backed up with a timestamp first). It also installs the
+daemon's runtime libraries (apt, no-op when already present) and verifies the
+binary runs, failing with an `ldd` list of missing libraries otherwise.
 
 ## Docker
+
+The image is **single-arch**: the builder stage compiles the daemon with the
+host toolchain (`pio run -e native` — no cross-compilation). Build it on the
+RPi5, or from an x86 host with `docker buildx build --platform linux/arm64
+-f packaging/rpi5-rak6421/Dockerfile -t meshtasticd-multi .` (QEMU emulation,
+slow). An x86 image built on a laptop will not run on the Pi.
 
 ```bash
 docker build -f packaging/rpi5-rak6421/Dockerfile -t meshtasticd-multi .
@@ -83,11 +107,47 @@ docker run --rm -it --net host \
 ```
 
 Runs as root inside the container (spidev/gpio device access); the dedicated
-`meshtasticd` user + VFS layout are still created inside the image.
+`meshtasticd` user + VFS layout are still created inside the image. For an
+unprivileged run, use the in-image user *and* the host device groups (device
+nodes must be group-accessible — stock trixie udev gives `spidev*` / `ttyAMA0`
+/ `gpiochip*` mode 0660 in groups `spi` / `dialout` / `gpio`):
 
-**MAC note:** the container has no hardware MAC, so the daemon needs a
-resolvable MAC to derive its node ID — set `MACAddress` in `config.yaml`, or
-`MACAddressSource: <iface>` under `General:`.
+```bash
+docker run --rm -it --net host \
+    --user meshtasticd --group-add spi --group-add gpio \
+    --device /dev/spidev0.0 --device /dev/gpiochip0 \
+    -v meshtasticd-vfs:/var/lib/meshtasticd meshtasticd-multi
+```
+
+The packet log file is pre-created in the image, so the unprivileged user can
+append to it from first boot.
+
+**TLS note:** the self-signed web key/cert is generated at build time and is
+therefore *shared by every container of this image* (image contents can be
+extracted, so `chmod 600` is not real protection). Fine for a single-node Pi;
+mount your own cert/key over `/etc/meshtasticd/ssl` for multiple instances or
+per-host identity.
+
+## MAC requirement (both deployment paths)
+
+The daemon refuses to start without a resolvable node MAC (`*** Blank MAC
+Address not allowed!`). The shipped `config.yaml` sets
+`General: MACAddress: 88:A2:9E:8B:80:5D` — the live node ID of the reference
+node k4nsy-long — so **both** the host and the container start out of the
+box; change the value when you deploy a different node.
+
+Why explicit instead of derived:
+
+- the hardware autoconf MAC source (Pi HAT+ / RAK eeprom) is skipped while
+  the config.d profile pins `Lora.Module: sx1262`;
+- the Bluetooth HCI fallback is dead on hosts with BT disabled — which is the
+  usual setup here, since `/dev/ttyAMA0` is the default BT serial port and
+  this config uses it for GPS — and inside containers with their own network
+  namespace; in every such case the daemon exits at startup.
+
+Prefer deriving it? `General: MACAddressSource: eth0` is readable by any user
+in any network namespace; the explicit value is simply what keeps the node ID
+stable and documented.
 
 ## Verify (concurrent clients)
 

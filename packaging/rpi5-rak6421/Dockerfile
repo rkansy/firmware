@@ -7,14 +7,27 @@
 #
 # Build (from the repo root):
 #   docker build -f packaging/rpi5-rak6421/Dockerfile -t meshtasticd-multi .
+#
+# PLATFORM: this image is SINGLE-ARCH. The builder stage compiles the daemon
+# with the HOST toolchain (`pio run -e native` — no cross-compilation), so
+# the image only runs on the architecture it was built on. Build directly on
+# the RPi5 (arm64), or from an x86 host with
+#   docker buildx build --platform linux/arm64 -f packaging/rpi5-rak6421/Dockerfile -t meshtasticd-multi .
+# (QEMU emulation — slow). Building on a laptop and running on the Pi will NOT work.
+#
 # Run with the radio attached:
 #   docker run --rm -it --net host --device /dev/spidev0.0 --device /dev/gpiochip0 \
 #     -v meshtasticd-vfs:/var/lib/meshtasticd meshtasticd-multi
 #
 # The container runs as root by default because the SX1262 on spidev0.0 and the
-# libgpiod pins need elevated access inside a container. For an unprivileged
-# run, add the host's spidev/gpio device groups and use the 'meshtasticd' user
-# (created below) via `--user meshtasticd`.
+# libgpiod pins need elevated access inside a container. For an
+# unprivileged run, use the in-image 'meshtasticd' user plus the host device
+# groups (device nodes must be group-accessible — stock trixie udev gives
+# spidev* / ttyAMA0 / gpiochip* mode 0660 in groups spi / dialout / gpio):
+#   docker run --rm -it --net host \
+#     --user meshtasticd --group-add spi --group-add gpio \
+#     --device /dev/spidev0.0 --device /dev/gpiochip0 \
+#     -v meshtasticd-vfs:/var/lib/meshtasticd meshtasticd-multi
 
 # trunk-ignore-all(trivy/DS002): we run as root for container device access
 # trunk-ignore-all(hadolint/DL3002): device access needs root
@@ -74,7 +87,15 @@ RUN apt-get update && apt-get --no-install-recommends -y install \
                /etc/meshtasticd/ssl \
                /usr/share/meshtasticd/web \
     && chown -R meshtasticd:meshtasticd /var/lib/meshtasticd \
-    # one-time self-signed HTTPS cert so the webserver can start out of the box
+    # Pre-create the packet log (Logging.JSONFile in the shipped config) so
+    # an unprivileged `--user meshtasticd` run can append to it from first
+    # boot; 0600 because it contains decoded packet payloads.
+    && touch /var/lib/meshtasticd/packets.json \
+    # one-time self-signed HTTPS cert so the webserver can start out of the box.
+    # Known limitation (documented, not re-architected): the key/cert are
+    # baked into the image and therefore SHARED by every container of this
+    # image (chmod 600 does not protect against image extraction). Mount
+    # your own cert/key over /etc/meshtasticd/ssl if that matters.
     && CN=meshtasticd \
     && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
          -keyout /etc/meshtasticd/ssl/private_key.pem \
@@ -87,6 +108,9 @@ COPY --from=builder /tmp/firmware/release/meshtasticd /usr/bin/meshtasticd
 COPY --from=builder /tmp/web /usr/share/meshtasticd/web/
 COPY packaging/rpi5-rak6421/config.yaml /etc/meshtasticd/config.yaml
 COPY packaging/rpi5-rak6421/config.d/lora-RAK6421-13300-slot1.yaml /etc/meshtasticd/config.d/
+# Stock radio profiles (incl. the RAK6421 variants) — copy one to config.d/ to
+# activate it, matching the host installer's available.d/.
+COPY ./bin/config.d/ /etc/meshtasticd/available.d/
 
 WORKDIR /var/lib/meshtasticd
 VOLUME /var/lib/meshtasticd
@@ -94,5 +118,6 @@ VOLUME /var/lib/meshtasticd
 # TCP API (multi-client) + HTTPS web UI
 EXPOSE 4403 9443
 
-# Root by default for spidev/gpio access; override with --user for unprivileged.
+# Root by default for spidev/gpio access; override with --user meshtasticd
+# (plus --group-add spi --group-add gpio) for an unprivileged run.
 CMD [ "meshtasticd", "--config=/etc/meshtasticd/config.yaml", "--fsdir=/var/lib/meshtasticd" ]

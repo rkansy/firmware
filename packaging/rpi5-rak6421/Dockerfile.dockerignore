@@ -1,0 +1,21 @@
+# Real .dockerignore for `docker build -f packaging/rpi5-rak6421/Dockerfile .`
+# (build context = repo root). BuildKit — the default in modern docker — honors
+# this <Dockerfile>.dockerignore file next to the Dockerfile; legacy builders
+# fall back to the repo-root .dockerignore. The root file is a symlink to
+# .gitignore, which does not exclude .git (the 80+ MB of context bloat) and
+# whose symlink handling is builder-version-dependent — hence this file.
+#
+# Everything below is verified unnecessary for `pio run -e native`
+# (bin/build-native.sh + bin/buildinfo.py read version.properties, not .git).
+.git
+.pio
+release/
+venv/
+.venv/
+.vscode
+.idea
+.trunk
+mcp-server/
+*.tar
+*.uf2
+*.zip
