@@ -46,8 +46,10 @@ void releaseFilesManifest(std::vector<meshtastic_FileInfo> &filesManifest)
 } // namespace
 
 PhoneAPI::PhoneAPI()
+#if defined(ARCH_PORTDUINO)
     : mcPacketQueue(MAX_RX_TOPHONE), mcQueueStatusQueue(MAX_RX_QUEUESTATUS_TOPHONE),
       mcMqttClientProxyQueue(MAX_RX_MQTTPROXY_TOPHONE), mcClientNotificationQueue(MAX_RX_NOTIFICATION_TOPHONE)
+#endif
 {
     lastContactMsec = millis();
     std::fill(std::begin(recentToRadioPacketIds), std::end(recentToRadioPacketIds), 0);
@@ -119,6 +121,7 @@ void PhoneAPI::close()
         // The opt-in flag stays set: a reconnect (want_config on the same
         // link) re-registers in handleStartConfig().
         multiClientHub.unregisterClient(this);
+#if defined(ARCH_PORTDUINO)
         {
             std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
             // F3: dequeue() (bool) so a nullptr entry queued by a pre-F10 fan-out
@@ -141,6 +144,7 @@ void PhoneAPI::close()
                 if (cn)
                     service->releaseClientNotificationToPool(cn);
         }
+#endif
     }
     if (service->api_state == service->STATE_BLE && api_type == TYPE_BLE)
         service->api_state = service->STATE_DISCONNECTED;
@@ -753,6 +757,7 @@ void PhoneAPI::releaseClientNotification()
 
 void PhoneAPI::mcEnqueuePacket(meshtastic_MeshPacket *p)
 {
+#if defined(ARCH_PORTDUINO)
     std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcPacketQueue.numFree() == 0) {
         if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP || p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP) {
@@ -767,10 +772,14 @@ void PhoneAPI::mcEnqueuePacket(meshtastic_MeshPacket *p)
         }
     }
     mcPacketQueue.enqueue(p, 0);
+#else
+    (void)p; // unreachable: multi-client delivery is portduino-only (F13)
+#endif
 }
 
 void PhoneAPI::mcEnqueueQueueStatus(meshtastic_QueueStatus *q)
 {
+#if defined(ARCH_PORTDUINO)
     std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcQueueStatusQueue.numFree() == 0) {
         LOG_WARN("MultiClient: queue-status queue full, discard oldest");
@@ -779,10 +788,14 @@ void PhoneAPI::mcEnqueueQueueStatus(meshtastic_QueueStatus *q)
             service->releaseQueueStatusToPool(d);
     }
     mcQueueStatusQueue.enqueue(q, 0);
+#else
+    (void)q; // unreachable: multi-client delivery is portduino-only (F13)
+#endif
 }
 
 void PhoneAPI::mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage *m)
 {
+#if defined(ARCH_PORTDUINO)
     std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcMqttClientProxyQueue.numFree() == 0) {
         LOG_WARN("MultiClient: mqtt proxy queue full, discard oldest");
@@ -791,10 +804,14 @@ void PhoneAPI::mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage
             service->releaseMqttClientProxyMessageToPool(d);
     }
     mcMqttClientProxyQueue.enqueue(m, 0);
+#else
+    (void)m; // unreachable: multi-client delivery is portduino-only (F13)
+#endif
 }
 
 void PhoneAPI::mcEnqueueClientNotification(meshtastic_ClientNotification *n)
 {
+#if defined(ARCH_PORTDUINO)
     std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcClientNotificationQueue.numFree() == 0) {
         LOG_WARN("MultiClient: notification queue full, discard oldest");
@@ -803,6 +820,9 @@ void PhoneAPI::mcEnqueueClientNotification(meshtastic_ClientNotification *n)
             service->releaseClientNotificationToPool(d);
     }
     mcClientNotificationQueue.enqueue(n, 0);
+#else
+    (void)n; // unreachable: multi-client delivery is portduino-only (F13)
+#endif
 }
 
 /**
@@ -840,6 +860,7 @@ bool PhoneAPI::available()
             // Per-connection queues fed by the MultiClientHub (fan-out + id remap).
             // XModem file transfer is not served in multi-client mode (the HTTPS
             // webserver covers file access on the daemon).
+#if defined(ARCH_PORTDUINO)
             {
                 std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
                 if (!queueStatusPacketForPhone)
@@ -852,6 +873,9 @@ bool PhoneAPI::available()
                     packetForPhone = mcPacketQueue.dequeuePtr(0);
             }
             return !!(queueStatusPacketForPhone || mqttClientProxyMessageForPhone || clientNotification || packetForPhone);
+#else
+            return false; // unreachable: multi-client delivery is portduino-only (F13)
+#endif
         }
         if (!queueStatusPacketForPhone)
             queueStatusPacketForPhone = service->getQueueStatusForPhone();

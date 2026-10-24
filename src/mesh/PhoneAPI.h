@@ -112,6 +112,11 @@ class PhoneAPI
     // to zero-id sends at the API boundary (before the hub remap), so the
     // mesh layer never generates an untracked, unowned id.
     uint32_t mcGeneratedId = 0x01000000;
+#if defined(ARCH_PORTDUINO)
+    // Multi-client queues (MULT-184 F13): portduino-only. On FreeRTOS targets
+    // multi-client delivery never engages (enableMultiClientDelivery is called
+    // from portduino code only), and each PointerQueue would otherwise cost an
+    // xQueueCreate per PhoneAPI instance.
     PointerQueue<meshtastic_MeshPacket> mcPacketQueue;
     PointerQueue<meshtastic_QueueStatus> mcQueueStatusQueue;
     PointerQueue<meshtastic_MqttClientProxyMessage> mcMqttClientProxyQueue;
@@ -121,6 +126,7 @@ class PhoneAPI
     // the ulfius host thread (MULT-184 F2). Lock order, if ever nested, is hub
     // -> client queue, and the hub never holds its lock while calling mcEnqueue*.
     std::mutex mcQueueMutex;
+#endif
 
     std::vector<meshtastic_FileInfo> filesManifest = {};
 
