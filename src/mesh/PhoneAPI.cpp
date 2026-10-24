@@ -120,18 +120,25 @@ void PhoneAPI::close()
         multiClientHub.unregisterClient(this);
         {
             std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
+            // F3: dequeue() (bool) so a nullptr entry queued by a pre-F10 fan-out
+            // is skipped, not treated as end-of-queue — stopping at the first
+            // null permanently leaked the still-live entries behind it.
             meshtastic_MeshPacket *mp;
-            while ((mp = mcPacketQueue.dequeuePtr(0)) != nullptr)
-                service->releaseToPool(mp);
+            while (mcPacketQueue.dequeue(&mp, 0))
+                if (mp)
+                    service->releaseToPool(mp);
             meshtastic_QueueStatus *qs;
-            while ((qs = mcQueueStatusQueue.dequeuePtr(0)) != nullptr)
-                service->releaseQueueStatusToPool(qs);
+            while (mcQueueStatusQueue.dequeue(&qs, 0))
+                if (qs)
+                    service->releaseQueueStatusToPool(qs);
             meshtastic_MqttClientProxyMessage *mq;
-            while ((mq = mcMqttClientProxyQueue.dequeuePtr(0)) != nullptr)
-                service->releaseMqttClientProxyMessageToPool(mq);
+            while (mcMqttClientProxyQueue.dequeue(&mq, 0))
+                if (mq)
+                    service->releaseMqttClientProxyMessageToPool(mq);
             meshtastic_ClientNotification *cn;
-            while ((cn = mcClientNotificationQueue.dequeuePtr(0)) != nullptr)
-                service->releaseClientNotificationToPool(cn);
+            while (mcClientNotificationQueue.dequeue(&cn, 0))
+                if (cn)
+                    service->releaseClientNotificationToPool(cn);
         }
     }
     if (service->api_state == service->STATE_BLE && api_type == TYPE_BLE)
@@ -877,6 +884,12 @@ bool PhoneAPI::available()
 void PhoneAPI::sendNotification(meshtastic_LogRecord_Level level, uint32_t replyId, const char *message)
 {
     meshtastic_ClientNotification *cn = clientNotificationPool.allocZeroed();
+    if (!cn) {
+        // F3: fixed 4-slot pool exhausted — drop the notification rather than
+        // dereferencing null.
+        LOG_WARN("MultiClient: ClientNotification pool exhausted, dropping notification");
+        return;
+    }
     cn->has_reply_id = true;
     cn->reply_id = replyId;
     cn->level = meshtastic_LogRecord_Level_WARNING;

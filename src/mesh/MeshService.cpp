@@ -225,6 +225,13 @@ bool MeshService::cancelSending(PacketId id)
 ErrorCode MeshService::sendQueueStatusToPhone(const meshtastic_QueueStatus &qs, ErrorCode res, uint32_t mesh_packet_id)
 {
     meshtastic_QueueStatus *copied = queueStatusPool.allocCopy(qs);
+    if (!copied) {
+        // F3: the fixed 4-slot pool is exhausted (e.g. two slow clients with
+        // full per-client queues hold all slots). Drop this status instead of
+        // dereferencing null.
+        LOG_WARN("MultiClient: QueueStatus pool exhausted, dropping status for packet 0x%x", (unsigned)mesh_packet_id);
+        return ERRNO_UNKNOWN;
+    }
 
     copied->res = res;
     copied->mesh_packet_id = mesh_packet_id;

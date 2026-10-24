@@ -135,10 +135,20 @@ void MultiClientHub::deliverPacket(meshtastic_MeshPacket *p)
         return;
     }
     for (size_t i = 0; i < targets.size(); i++) {
-        if (i + 1 == targets.size())
+        if (i + 1 == targets.size()) {
             targets[i]->mcEnqueuePacket(p); // last client takes ownership
-        else
-            targets[i]->mcEnqueuePacket(packetPool.allocCopy(*p));
+        } else {
+            // F10: the pool may be exhausted; a null clone must not be
+            // enqueued (it would leak a pool slot and wedge close()'s drain).
+            meshtastic_MeshPacket *copy = packetPool.allocCopy(*p);
+            if (!copy) {
+                LOG_WARN("MultiClient: packet pool exhausted, dropping fan-out to %u remaining client(s)",
+                         (unsigned)(targets.size() - i));
+                packetPool.release(p);
+                return;
+            }
+            targets[i]->mcEnqueuePacket(copy);
+        }
     }
 }
 
@@ -163,10 +173,18 @@ void MultiClientHub::deliverQueueStatus(meshtastic_QueueStatus *q)
         return;
     }
     for (size_t i = 0; i < targets.size(); i++) {
-        if (i + 1 == targets.size())
+        if (i + 1 == targets.size()) {
             targets[i]->mcEnqueueQueueStatus(q);
-        else
-            targets[i]->mcEnqueueQueueStatus(queueStatusPool.allocCopy(*q));
+        } else {
+            meshtastic_QueueStatus *copy = queueStatusPool.allocCopy(*q); // F10
+            if (!copy) {
+                LOG_WARN("MultiClient: QueueStatus pool exhausted, dropping fan-out to %u remaining client(s)",
+                         (unsigned)(targets.size() - i));
+                queueStatusPool.release(q);
+                return;
+            }
+            targets[i]->mcEnqueueQueueStatus(copy);
+        }
     }
 }
 
@@ -182,10 +200,18 @@ void MultiClientHub::deliverMqttClientProxyMessage(meshtastic_MqttClientProxyMes
         return;
     }
     for (size_t i = 0; i < targets.size(); i++) {
-        if (i + 1 == targets.size())
+        if (i + 1 == targets.size()) {
             targets[i]->mcEnqueueMqttClientProxyMessage(m);
-        else
-            targets[i]->mcEnqueueMqttClientProxyMessage(mqttClientProxyMessagePool.allocCopy(*m));
+        } else {
+            meshtastic_MqttClientProxyMessage *copy = mqttClientProxyMessagePool.allocCopy(*m); // F10
+            if (!copy) {
+                LOG_WARN("MultiClient: MqttClientProxy pool exhausted, dropping fan-out to %u remaining client(s)",
+                         (unsigned)(targets.size() - i));
+                mqttClientProxyMessagePool.release(m);
+                return;
+            }
+            targets[i]->mcEnqueueMqttClientProxyMessage(copy);
+        }
     }
 }
 
@@ -209,9 +235,17 @@ void MultiClientHub::deliverClientNotification(meshtastic_ClientNotification *n)
         return;
     }
     for (size_t i = 0; i < targets.size(); i++) {
-        if (i + 1 == targets.size())
+        if (i + 1 == targets.size()) {
             targets[i]->mcEnqueueClientNotification(n);
-        else
-            targets[i]->mcEnqueueClientNotification(clientNotificationPool.allocCopy(*n));
+        } else {
+            meshtastic_ClientNotification *copy = clientNotificationPool.allocCopy(*n); // F10
+            if (!copy) {
+                LOG_WARN("MultiClient: ClientNotification pool exhausted, dropping fan-out to %u remaining client(s)",
+                         (unsigned)(targets.size() - i));
+                clientNotificationPool.release(n);
+                return;
+            }
+            targets[i]->mcEnqueueClientNotification(copy);
+        }
     }
 }
