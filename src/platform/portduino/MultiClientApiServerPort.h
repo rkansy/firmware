@@ -18,6 +18,10 @@
  *
  * Wire framing is byte-identical to stock (0x94 0xC3 + 2-byte BE length), so
  * existing single-client clients work unmodified.
+ *
+ * Concurrent sessions are capped (kMaxApiClients, see the .cpp) so the
+ * per-session OSThread registrations cannot overflow the cooperative thread
+ * registry; connections beyond the cap are rejected.
  */
 class MultiClientApiServerPort : public WiFiServerPort
 {
