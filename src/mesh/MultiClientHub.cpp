@@ -80,13 +80,18 @@ void MultiClientHub::deliverPacket(meshtastic_MeshPacket *p)
 
     // A response (routing ACK/NAK, route reply, nodeinfo reply, ...) that
     // references one of our remapped ids goes only to the client that sent
-    // the original packet, with its id restored.
+    // the original packet, with its id restored. Responses come from remote
+    // nodes, so this branch must stay open to any origin.
     if (p->decoded.request_id != 0)
         owner = resolvePacket(p->decoded.request_id, &p->decoded.request_id);
 
     // The packet itself is a client-originated packet (our own broadcast,
     // sim-mode echo, ...): restore the client id, still fan out to everyone.
-    if (!owner && p->id != 0)
+    // Only local echoes are eligible (MULT-184 F7): id and request_id are
+    // peer-controllable protocol fields, so a remote packet whose id equals a
+    // live (small, sequential) server id must not be rewritten to that
+    // client's original id or owner-routed away from the other clients.
+    if (!owner && p->id != 0 && isFromUs(p))
         resolvePacket(p->id, &p->id);
 
     if (owner) {
