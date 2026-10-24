@@ -14,6 +14,9 @@ Sections (which apply on hardware vs sim are printed at startup):
   6. want_ack DM: the routing response is owner-routed          [hw + sim]
   7. A disconnects; B's session is undisturbed                  [hw + sim]
   8. a new client can connect after A left                      [hw + sim]
+  9. zero-id send gets a server-assigned id, owner-routed (F4)  [hw + sim]
+ 10. ~30 idle TCP connections: the admission cap rejects the
+    excess and the daemon stays up, a fresh client still works   [hw + sim]
 
 Sections 2-3 are sim-only: on stock code the multi-client fan-out is only
 triggered by the radio RX path, and the simulated radio (-s) is the only one
@@ -293,9 +296,9 @@ def main():
 
     print(f"smoke_multiclient: {args.host}:{args.port}  mode={'sim' if args.sim else 'hardware'}")
     if args.sim:
-        print("  applicable sections: 1-8 (all)")
+        print("  applicable sections: 1-10 (all)")
     else:
-        print("  applicable sections: 1, 4, 5, 6, 7, 8")
+        print("  applicable sections: 1, 4, 5, 6, 7, 8, 9, 10")
         print("  skipped (sim-only): 2 (own echo), 3 (fan-out) — stock fan-out needs")
         print("    real radio RX traffic; the sim echo (-s) is the only trigger.")
         print("    Run the daemon with -s and pass -s here to exercise them.")
@@ -443,6 +446,99 @@ def main():
     except OSError as e:  # daemon died mid-run
         check(False, f"C could not connect after A left ({e})")
         C = None
+
+    print("== 9. zero-id send: the server assigns a client-visible id, owner-routed (F4) ==")
+    D = None
+    try:
+        D = Client("D", nonce=0x0D0D0004, host=args.host, port=args.port)
+        cfgD = D.wait_config()
+        check(cfgD is not None, "D completed config (B and C connected)")
+        D.send_text("zero id send", pkt_id=0)
+        # D must get a queue status for its zero-id send carrying a NON-zero,
+        # server-assigned client-visible id (before F4 the mesh layer generated
+        # an untracked id that was fanned out to every client).
+        fr9 = D.wait_for(
+            lambda m: m.HasField("queueStatus") and m.queueStatus.mesh_packet_id != 0,
+            timeout=15,
+        )
+        check(fr9 is not None, "D got a queue status for its zero-id send")
+        if fr9 is not None:
+            gen_id = fr9.queueStatus.mesh_packet_id
+            check(gen_id != 0, f"D's zero-id send got a server-assigned non-zero id ({gen_id:#x})")
+            D.drain(3.0)
+            B.drain(3.0)
+            check(
+                not B.queue_statuses(gen_id),
+                "B did NOT receive D's zero-id-send queue status (owner routing, not fan-out)",
+            )
+            if args.sim:
+                check(D.saw_echo(gen_id, b"zero id send"), "D saw its own echo with the assigned id")
+                check(
+                    B.saw_echo(gen_id, b"zero id send"),
+                    "B's fan-out copy of the echo carries the client-visible id (no internal server id on the wire)",
+                )
+    except OSError as e:
+        check(False, f"D could not connect for the zero-id check ({e})")
+    if D is not None:
+        D.close()
+
+    print("== 10. admission cap: ~30 idle TCP connections, daemon stays up (F1) ==")
+    # Open ~30 sequential idle (no API traffic) TCP connections. The daemon
+    # caps concurrent sessions at 8; connections beyond the cap must be
+    # rejected (closed) by the daemon, and the daemon must stay up.
+    MAX_API_CLIENTS = 8
+    raw = []
+    for i in range(30):
+        try:
+            s = socket.create_connection((args.host, args.port), timeout=5)
+            s.settimeout(0.3)
+            raw.append(s)
+        except OSError as e:
+            check(False, f"raw connection {i} failed ({e})")
+    # The daemon's accept loop runs on the cooperative main loop (~100 ms
+    # period) and drains the whole backlog in one pass; give it ample time.
+    time.sleep(4.0)
+    open_n = 0
+    closed_n = 0
+    for s in raw:
+        try:
+            data = s.recv(1)
+            if data == b"":
+                closed_n += 1  # EOF: the daemon rejected (stopped) this connection
+            else:
+                open_n += 1
+        except socket.timeout:
+            open_n += 1  # still open and idle
+        except OSError:
+            closed_n += 1  # reset/closed
+    for s in raw:
+        try:
+            # Linger-0 close: send RST instead of FIN, modeling clients that
+            # went away (process exit / network failure). The daemon notices
+            # the dead peer on its next socket read; a clean FIN is only
+            # detected on the next write or after the 15-min idle timeout
+            # (pre-existing upstream WiFiClient behavior, out of scope here).
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            s.close()
+        except OSError:
+            pass
+    check(
+        open_n <= MAX_API_CLIENTS,
+        f"at most {MAX_API_CLIENTS} idle connections are held open (open {open_n})",
+    )
+    check(closed_n >= 1, f"connections beyond the cap were rejected/closed ({closed_n} closed)")
+    # Let the daemon reap the (now dead) idle sessions it accepted, then a
+    # fresh, normal client must be able to complete a config handshake.
+    time.sleep(3.0)
+    E = None
+    try:
+        E = Client("E", nonce=0x0E0E0005, host=args.host, port=args.port)
+        cfgE = E.wait_config()
+        check(cfgE is not None, "fresh client completes config after the connection storm (daemon alive)")
+    except OSError as e:
+        check(False, f"the daemon no longer accepts API clients after the storm ({e})")
+    if E is not None:
+        E.close()
 
     B.close()
     if C is not None:
