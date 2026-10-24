@@ -223,6 +223,16 @@ bool PhoneAPI::handleToRadio(const uint8_t *buf, size_t bufLength)
             break;
         case meshtastic_ToRadio_xmodemPacket_tag:
             LOG_INFO("Got xmodem packet");
+            if (multiClientEnabled) {
+                // F9: multi-client mode does not serve XModem (the HTTPS
+                // webserver covers file access). Do not advance the xmodem
+                // state machine — a downloading client (e.g. the Python
+                // client's get_file) would otherwise hang until timeout;
+                // fail fast with a notification instead.
+                sendNotification(meshtastic_LogRecord_Level_WARNING, 0,
+                                 "XModem file transfer is not supported in multi-client mode; use the web UI");
+                return false;
+            }
 #ifdef FSCom
             xModem.handlePacket(toRadioScratch.xmodemPacket);
 #endif

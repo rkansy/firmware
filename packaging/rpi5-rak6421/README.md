@@ -41,7 +41,12 @@ retires that proxy:
 
 Wire framing is byte-identical to stock (`0x94 0xC3` + 2-byte BE length +
 ToRadio/FromRadio), so existing clients (`meshtastic` CLI/Python,
-`aprstasticd`, `meshtastic-mcp`) work unmodified.
+`aprstasticd`, `meshtastic-mcp`) work unmodified — with one qualification:
+**XModem file transfer is not supported in multi-client mode** (the HTTPS
+web UI on 9443 covers file access). A `xmodemPacket` ToRadio from a TCP
+client is rejected with a `ClientNotification` instead of advancing the
+xmodem state machine, so e.g. the Python client's `get_file()` fails fast
+rather than hanging until timeout.
 
 ## Layout
 
