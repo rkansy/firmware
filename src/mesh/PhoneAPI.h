@@ -108,6 +108,10 @@ class PhoneAPI
     /// items from its own per-connection queues, fed by the MultiClientHub, instead
     /// of the single shared MeshService "to phone" queues.
     bool multiClientEnabled = false;
+    // F4: base of the per-connection counter that assigns client-visible ids
+    // to zero-id sends at the API boundary (before the hub remap), so the
+    // mesh layer never generates an untracked, unowned id.
+    uint32_t mcGeneratedId = 0x01000000;
     PointerQueue<meshtastic_MeshPacket> mcPacketQueue;
     PointerQueue<meshtastic_QueueStatus> mcQueueStatusQueue;
     PointerQueue<meshtastic_MqttClientProxyMessage> mcMqttClientProxyQueue;
@@ -230,6 +234,9 @@ class PhoneAPI
     void releaseClientNotification();
 
     bool wasSeenRecently(uint32_t packetId);
+
+    /// F4: fresh client-visible id for a zero-id send in multi-client mode.
+    uint32_t nextClientVisibleId();
 
     /**
      * Handle a packet that the phone wants us to send.  We can write to it but can not keep a reference to it

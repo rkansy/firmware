@@ -19,6 +19,7 @@
 #include "main.h"
 #include "modules/NodeInfoModule.h"
 #include "xmodem.h"
+#include <algorithm>
 
 #if FromRadio_size > MAX_TO_FROM_RADIO_SIZE
 #error FromRadio is too big
@@ -915,6 +916,25 @@ bool PhoneAPI::wasSeenRecently(uint32_t id)
     return false;
 }
 
+uint32_t PhoneAPI::nextClientVisibleId()
+{
+    // F4: the client chose no id (p.id == 0). Assign a client-visible id at
+    // the API boundary — before the hub remap — so the mesh layer never
+    // generates an untracked id whose responses the hub would treat as
+    // unknown and fan out to every client. The per-connection counter starts
+    // from a high base (unlikely in client-chosen ids) and skips ids this
+    // connection recently used, so an echo cannot be mistaken for live
+    // traffic.
+    uint32_t id;
+    do {
+        id = ++mcGeneratedId;
+        if (id == 0)
+            id = ++mcGeneratedId; // 0 is "unset"
+    } while (std::find(std::begin(recentToRadioPacketIds), std::end(recentToRadioPacketIds), id) !=
+             std::end(recentToRadioPacketIds));
+    return id;
+}
+
 /**
  * Handle a packet that the phone wants us to send.  It is our responsibility to free the packet to the pool
  */
@@ -934,9 +954,14 @@ bool PhoneAPI::handleToRadioPacket(meshtastic_MeshPacket &p)
     // Multi-client: remap the client's packet id to a server-unique id so
     // concurrent clients cannot produce colliding mesh packet ids; matching
     // responses (routing ACK/NAK, queue status, notifications) are routed back
-    // to this connection with the original id restored.
-    if (multiClientEnabled && p.id != 0)
+    // to this connection with the original id restored. A zero-id send is
+    // first assigned a client-visible id at this boundary (F4) so the mesh
+    // layer never generates an untracked id.
+    if (multiClientEnabled) {
+        if (p.id == 0)
+            p.id = nextClientVisibleId();
         p.id = multiClientHub.registerPacket(this, p.id);
+    }
 
     if (p.decoded.portnum == meshtastic_PortNum_TRACEROUTE_APP && lastPortNumToRadio[p.decoded.portnum] &&
         Throttle::isWithinTimespanMs(lastPortNumToRadio[p.decoded.portnum], THIRTY_SECONDS_MS)) {
