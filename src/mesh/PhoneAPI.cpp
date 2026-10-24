@@ -118,18 +118,21 @@ void PhoneAPI::close()
         // The opt-in flag stays set: a reconnect (want_config on the same
         // link) re-registers in handleStartConfig().
         multiClientHub.unregisterClient(this);
-        meshtastic_MeshPacket *mp;
-        while ((mp = mcPacketQueue.dequeuePtr(0)) != nullptr)
-            service->releaseToPool(mp);
-        meshtastic_QueueStatus *qs;
-        while ((qs = mcQueueStatusQueue.dequeuePtr(0)) != nullptr)
-            service->releaseQueueStatusToPool(qs);
-        meshtastic_MqttClientProxyMessage *mq;
-        while ((mq = mcMqttClientProxyQueue.dequeuePtr(0)) != nullptr)
-            service->releaseMqttClientProxyMessageToPool(mq);
-        meshtastic_ClientNotification *cn;
-        while ((cn = mcClientNotificationQueue.dequeuePtr(0)) != nullptr)
-            service->releaseClientNotificationToPool(cn);
+        {
+            std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
+            meshtastic_MeshPacket *mp;
+            while ((mp = mcPacketQueue.dequeuePtr(0)) != nullptr)
+                service->releaseToPool(mp);
+            meshtastic_QueueStatus *qs;
+            while ((qs = mcQueueStatusQueue.dequeuePtr(0)) != nullptr)
+                service->releaseQueueStatusToPool(qs);
+            meshtastic_MqttClientProxyMessage *mq;
+            while ((mq = mcMqttClientProxyQueue.dequeuePtr(0)) != nullptr)
+                service->releaseMqttClientProxyMessageToPool(mq);
+            meshtastic_ClientNotification *cn;
+            while ((cn = mcClientNotificationQueue.dequeuePtr(0)) != nullptr)
+                service->releaseClientNotificationToPool(cn);
+        }
     }
     if (service->api_state == service->STATE_BLE && api_type == TYPE_BLE)
         service->api_state = service->STATE_DISCONNECTED;
@@ -732,6 +735,7 @@ void PhoneAPI::releaseClientNotification()
 
 void PhoneAPI::mcEnqueuePacket(meshtastic_MeshPacket *p)
 {
+    std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcPacketQueue.numFree() == 0) {
         if (p->decoded.portnum == meshtastic_PortNum_TEXT_MESSAGE_APP || p->decoded.portnum == meshtastic_PortNum_RANGE_TEST_APP) {
             LOG_WARN("MultiClient: packet queue full, discard oldest");
@@ -749,6 +753,7 @@ void PhoneAPI::mcEnqueuePacket(meshtastic_MeshPacket *p)
 
 void PhoneAPI::mcEnqueueQueueStatus(meshtastic_QueueStatus *q)
 {
+    std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcQueueStatusQueue.numFree() == 0) {
         LOG_WARN("MultiClient: queue-status queue full, discard oldest");
         meshtastic_QueueStatus *d = mcQueueStatusQueue.dequeuePtr(0);
@@ -760,6 +765,7 @@ void PhoneAPI::mcEnqueueQueueStatus(meshtastic_QueueStatus *q)
 
 void PhoneAPI::mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage *m)
 {
+    std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcMqttClientProxyQueue.numFree() == 0) {
         LOG_WARN("MultiClient: mqtt proxy queue full, discard oldest");
         meshtastic_MqttClientProxyMessage *d = mcMqttClientProxyQueue.dequeuePtr(0);
@@ -771,6 +777,7 @@ void PhoneAPI::mcEnqueueMqttClientProxyMessage(meshtastic_MqttClientProxyMessage
 
 void PhoneAPI::mcEnqueueClientNotification(meshtastic_ClientNotification *n)
 {
+    std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
     if (mcClientNotificationQueue.numFree() == 0) {
         LOG_WARN("MultiClient: notification queue full, discard oldest");
         meshtastic_ClientNotification *d = mcClientNotificationQueue.dequeuePtr(0);
@@ -815,14 +822,17 @@ bool PhoneAPI::available()
             // Per-connection queues fed by the MultiClientHub (fan-out + id remap).
             // XModem file transfer is not served in multi-client mode (the HTTPS
             // webserver covers file access on the daemon).
-            if (!queueStatusPacketForPhone)
-                queueStatusPacketForPhone = mcQueueStatusQueue.dequeuePtr(0);
-            if (!mqttClientProxyMessageForPhone)
-                mqttClientProxyMessageForPhone = mcMqttClientProxyQueue.dequeuePtr(0);
-            if (!clientNotification)
-                clientNotification = mcClientNotificationQueue.dequeuePtr(0);
-            if (!packetForPhone)
-                packetForPhone = mcPacketQueue.dequeuePtr(0);
+            {
+                std::lock_guard<std::mutex> lock(mcQueueMutex); // F2
+                if (!queueStatusPacketForPhone)
+                    queueStatusPacketForPhone = mcQueueStatusQueue.dequeuePtr(0);
+                if (!mqttClientProxyMessageForPhone)
+                    mqttClientProxyMessageForPhone = mcMqttClientProxyQueue.dequeuePtr(0);
+                if (!clientNotification)
+                    clientNotification = mcClientNotificationQueue.dequeuePtr(0);
+                if (!packetForPhone)
+                    packetForPhone = mcPacketQueue.dequeuePtr(0);
+            }
             return !!(queueStatusPacketForPhone || mqttClientProxyMessageForPhone || clientNotification || packetForPhone);
         }
         if (!queueStatusPacketForPhone)

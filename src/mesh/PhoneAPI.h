@@ -8,6 +8,7 @@
 #include "meshtastic/portnums.pb.h"
 #include <deque>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -111,6 +112,11 @@ class PhoneAPI
     PointerQueue<meshtastic_QueueStatus> mcQueueStatusQueue;
     PointerQueue<meshtastic_MqttClientProxyMessage> mcMqttClientProxyQueue;
     PointerQueue<meshtastic_ClientNotification> mcClientNotificationQueue;
+    // Guards the four mc queues above: they are enqueued by the MultiClientHub
+    // (main loop) and dequeued by available()/close(), which the web API runs in
+    // the ulfius host thread (MULT-184 F2). Lock order, if ever nested, is hub
+    // -> client queue, and the hub never holds its lock while calling mcEnqueue*.
+    std::mutex mcQueueMutex;
 
     std::vector<meshtastic_FileInfo> filesManifest = {};
 

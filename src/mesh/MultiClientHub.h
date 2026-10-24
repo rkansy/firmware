@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -34,8 +35,15 @@ typedef struct _meshtastic_ClientNotification meshtastic_ClientNotification;
  *   queue status, client notifications) are delivered only to the originating
  *   client with its original id restored.
  *
- * Everything runs on the single cooperative firmware loop, so no locks are
- * needed.
+ * Threading: the TCP clients' ToRadio/FromRadio processing runs on the
+ * cooperative firmware main loop, but the HTTP web API (PiWebServer, ulfius)
+ * is a registered multi-client endpoint too and handles ToRadio/FromRadio in
+ * a real host thread beside the main loop. Hub state (clients, remap, per-
+ * client order, nextServerId) is therefore guarded by hubMutex. The
+ * deliver* methods resolve the owner and snapshot the client list under the
+ * lock and only then enqueue — they never hold the hub lock while calling
+ * mcEnqueue* (which takes the client's own queue lock; lock order, if ever
+ * nested, would be hub -> client queue, and in practice is never nested).
  */
 
 /// A client endpoint that accepts per-client FromRadio delivery.
@@ -62,8 +70,16 @@ class MultiClientHub
 
     /// True when at least one multi-client endpoint is registered; in that
     /// case MeshService routes all phone-bound traffic through this hub.
-    bool active() const { return !clients.empty(); }
-    size_t clientCount() const { return clients.size(); }
+    bool active() const
+    {
+        std::lock_guard<std::mutex> lock(hubMutex);
+        return !clients.empty();
+    }
+    size_t clientCount() const
+    {
+        std::lock_guard<std::mutex> lock(hubMutex);
+        return clients.size();
+    }
 
     void registerClient(MCDeliveryTarget *client);
     /// Idempotent. Also drops this client's packet-id remap entries.
@@ -114,6 +130,12 @@ class MultiClientHub
     uint32_t nextServerId = 1; // id 0 is reserved ("unset")
 
     static constexpr size_t kMaxRemapEntriesPerClient = 2048;
+
+    /// Guards clients, remap, clientOrder and nextServerId (see class doc).
+    mutable std::mutex hubMutex;
+
+    /// remap lookup without locking; callers must hold hubMutex.
+    MCDeliveryTarget *resolvePacketLocked(uint32_t serverPacketId, uint32_t *clientPacketId) const;
 };
 
 extern MultiClientHub multiClientHub;
