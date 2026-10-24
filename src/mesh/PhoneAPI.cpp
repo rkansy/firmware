@@ -146,6 +146,8 @@ void PhoneAPI::close()
         }
 #endif
     }
+    // F11: api_state is shared across concurrent clients (see sendConfigComplete);
+    // clearing it here also clears another client's display state. Cosmetic.
     if (service->api_state == service->STATE_BLE && api_type == TYPE_BLE)
         service->api_state = service->STATE_DISCONNECTED;
     else if (service->api_state == service->STATE_WIFI && api_type == TYPE_WIFI)
@@ -670,6 +672,10 @@ void PhoneAPI::sendConfigComplete()
     fromRadioScratch.config_complete_id = config_nonce;
     config_nonce = 0;
     state = STATE_SEND_PACKETS;
+    // F11: service->api_state is one global shared by all concurrent API
+    // clients: each client's config completion (here) and disconnect (in
+    // close()) overwrites it, so it reflects the last client event only.
+    // It is consumed by UI/debug displays — cosmetic for the headless daemon.
     if (api_type == TYPE_BLE) {
         service->api_state = service->STATE_BLE;
     } else if (api_type == TYPE_WIFI) {

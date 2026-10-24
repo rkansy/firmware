@@ -45,8 +45,34 @@ ToRadio/FromRadio), so existing clients (`meshtastic` CLI/Python,
 **XModem file transfer is not supported in multi-client mode** (the HTTPS
 web UI on 9443 covers file access). A `xmodemPacket` ToRadio from a TCP
 client is rejected with a `ClientNotification` instead of advancing the
-xmodem state machine, so e.g. the Python client's `get_file()` fails fast
+xmodem state machine, so a TCP file download (e.g. the Python client's
+`get_file()`) gets the notification instead of XModem data and fails
 rather than hanging until timeout.
+
+## Client packet-id contract
+
+- **Client packet ids must be unique per client.** The server remaps each
+  client's outgoing `MeshPacket` ids to server-unique ids so concurrent
+  clients cannot collide. With *deliberately* colliding ids (two clients
+  pick the same client id), the non-owner fan-out copies of a local echo
+  carry the original (restored) id, so a receiver cannot tell whose echo it
+  is — match echoes by payload, not id alone. This is inherent to clients
+  choosing colliding ids (documented, not a bug).
+- **Sends without an id (`id == 0`) get one.** In multi-client mode the API
+  boundary assigns a fresh client-visible id before remapping, so matching
+  queue statuses / routing responses are owner-routed back to the sender
+  and never fanned out under an untracked server id.
+- **Concurrent clients are capped at 8.** Further TCP connections are
+  rejected immediately (the cooperative thread registry has a hard cap).
+
+## Packaging notes
+
+- **An I2C sensor config needs the `i2c` group.** The systemd unit's
+  `SupplementaryGroups` ships `dialout spi gpio`, which covers the bundled
+  SPI-radio + UART-GPS config; for an I2C sensor unit, add `i2c`.
+- **A `JSONFile.open()` failure at rotation time is silent.** Pre-existing
+  upstream behavior (`Router.cpp`): the daemon keeps running without logging
+  the failure. Not changed by this build.
 
 ## Layout
 

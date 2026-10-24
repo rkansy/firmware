@@ -70,6 +70,15 @@ class MultiClientHub
 
     /// True when at least one multi-client endpoint is registered; in that
     /// case MeshService routes all phone-bound traffic through this hub.
+    ///
+    /// F12 (design note): this gating is all-or-nothing. While any client is
+    /// registered, *all* phone-bound traffic (packets, queue statuses, mqtt
+    /// proxy, client notifications) is routed through the hub and the shared
+    /// single-client "to phone" queues are bypassed. A concurrently connected
+    /// PhoneAPI that never opted in (no enableMultiClientDelivery) would be
+    /// starved, because its available() drains the now-bypassed shared queues.
+    /// Today every transport opts in, but a future non-opting one must not be
+    /// mixed with hub clients.
     bool active() const
     {
         std::lock_guard<std::mutex> lock(hubMutex);
