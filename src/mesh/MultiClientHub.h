@@ -105,10 +105,15 @@ class MultiClientHub
 
     std::vector<MCDeliveryTarget *> clients;
     std::unordered_map<uint32_t, Entry> remap;
-    std::deque<uint32_t> remapOrder; // FIFO for the entry cap
-    uint32_t nextServerId = 1;       // id 0 is reserved ("unset")
+    // Per-client FIFO of live server ids (MULT-184 F5/F6, replacing a single
+    // global FIFO). Per-client eviction means a high-volume client can only
+    // evict its own oldest mapping, never another client's live mappings;
+    // and dropping a client removes its whole FIFO at once, so the bookkeeping
+    // stays bounded across connect/disconnect churn.
+    std::unordered_map<MCDeliveryTarget *, std::deque<uint32_t>> clientOrder;
+    uint32_t nextServerId = 1; // id 0 is reserved ("unset")
 
-    static constexpr size_t kMaxRemapEntries = 2048;
+    static constexpr size_t kMaxRemapEntriesPerClient = 2048;
 };
 
 extern MultiClientHub multiClientHub;

@@ -31,6 +31,9 @@ void MultiClientHub::unregisterClient(MCDeliveryTarget *client)
         else
             ++rit;
     }
+    // F5: also drop this client's per-client FIFO so its (now-erased) server
+    // ids do not linger as stale bookkeeping across connect/disconnect churn.
+    clientOrder.erase(client);
     LOG_INFO("MultiClient: client unregistered, %u connected", (unsigned)clients.size());
 }
 
@@ -43,17 +46,20 @@ uint32_t MultiClientHub::registerPacket(MCDeliveryTarget *owner, uint32_t client
     if (serverId == 0) // 0 means "unset" in the mesh protocol
         serverId = nextServerId++;
 
-    while (remap.size() >= kMaxRemapEntries) {
+    // F6: per-client cap. Evict only this client's own oldest mapping, so a
+    // high-volume client can never evict another client's live mappings.
+    auto &order = clientOrder[owner];
+    while (order.size() >= kMaxRemapEntriesPerClient) {
         // Cap reached: the oldest outstanding send has long since timed out on
         // the client; dropping its mapping only means its (late) response is
         // fanned out with the server id instead of the client id.
-        auto oldest = remapOrder.front();
-        remapOrder.pop_front();
+        auto oldest = order.front();
+        order.pop_front();
         remap.erase(oldest);
     }
 
     remap[serverId] = {owner, clientPacketId};
-    remapOrder.push_back(serverId);
+    order.push_back(serverId);
     LOG_DEBUG("MultiClient: remap client id 0x%x -> server id 0x%x", (unsigned)clientPacketId, (unsigned)serverId);
     return serverId;
 }
