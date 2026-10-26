@@ -1030,7 +1030,7 @@ MeshtasticMcpServer::MeshtasticMcpServer(int port) : concurrency::OSThread("McpS
     }
     bindAddress.sin_family = AF_INET;
     bindAddress.sin_port = htons((uint16_t)port);
-    bindAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bindAddress.sin_addr.s_addr = htonl(INADDR_ANY);
     if (ulfius_init_instance(&instance, (unsigned int)port, &bindAddress, "meshtastic-mcp") != U_OK) {
         LOG_ERROR("MCP server failed to initialize on port %d", port);
         disable();
@@ -1049,13 +1049,13 @@ MeshtasticMcpServer::MeshtasticMcpServer(int port) : concurrency::OSThread("McpS
     }
     const int startResult = ulfius_start_framework(&instance);
     if (startResult != U_OK) {
-        LOG_ERROR("MCP server failed to start on 127.0.0.1:%d (Ulfius error %d)", port, startResult);
+        LOG_ERROR("MCP server failed to start on 0.0.0.0:%d (Ulfius error %d)", port, startResult);
         ulfius_clean_instance(&instance);
         initialized = false;
         disable();
         return;
     }
-    LOG_INFO("MCP endpoint listening at http://127.0.0.1:%d%s", port, MCP_PATH);
+    LOG_INFO("MCP endpoint listening at http://0.0.0.0:%d%s", port, MCP_PATH);
 }
 
 json_t *MeshtasticMcpServer::dispatchRequest(json_t *request)
